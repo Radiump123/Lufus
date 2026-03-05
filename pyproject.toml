@@ -5,15 +5,10 @@ description = "Physical drive imaging and formatting utility written in Python"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.13"
-dependencies = [
-    "psutil>=7.2.2",
-    "pyqt6>=6.10.2",
-]
+dependencies = ["psutil>=7.2.2", "pyqt6>=6.10.2", "pyudev>=0.24.4"]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-]
+dev = ["pytest>=8.0.0"]
 
 [project.gui-scripts]
 rufus_py = "rufus_py.__main__:main"

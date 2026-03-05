@@ -1,4 +1,3 @@
-
 from rufus_py.gui.start_gui import launch_gui_with_usb_data
 
 def main():

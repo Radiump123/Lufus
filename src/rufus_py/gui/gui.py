@@ -14,7 +14,7 @@ from PyQt6.QtGui import QFont
 from rufus_py.drives import states
 from rufus_py.drives import formatting as fo
 from rufus_py.writing.flash_usb import FlashUSB
-
+from rufus_py.drives.autodetect_usb import UsbMonitor
 
 class LogWindow(QDialog):
     def __init__(self):
@@ -72,6 +72,11 @@ class FlashWorker(QThread): # this is so the ui dont freeze when flashing
 class Rufus(QMainWindow):
     def __init__(self, usb_devices=None):
         super().__init__()
+        self.monitor = UsbMonitor()
+        self.monitor.device_added.connect(self.on_usb_added)
+        self.monitor.device_removed.connect(self.on_usb_removed)
+        self.monitor.device_list_updated.connect(self.update_usb_list)
+        
         self.usb_devices = usb_devices or {}
         self.setWindowTitle("Rufus")
         self.setFixedSize(640, 700) 
@@ -225,7 +230,23 @@ class Rufus(QMainWindow):
         layout.addWidget(label)
         layout.addWidget(line, 1)
         return layout
+    
+    def update_usb_list(self,devices:dict):
+        self.combo_device.clear()
+        
+        if not devices:
+            self.combo_device.addItem("No USB devices found")
+            return
+        
+        for node in devices:
+            self.combo_device.addItem(node)
 
+    def on_usb_added(self, node):
+        QMessageBox.information(self, "USB Inserted", f"{node} connected")
+
+    def on_usb_removed(self, node):
+        QMessageBox.warning(self, "USB Removed", f"{node} disconnected")
+    
     def init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -240,12 +261,12 @@ class Rufus(QMainWindow):
         self.combo_device = QComboBox()
         
         # Populate combo box with detected USB devices
-        if self.usb_devices:
+        # if self.usb_devices:
             
-            for path, label in self.usb_devices.items():
-                self.combo_device.addItem(f"{label} ({path})")
-        else:
-            self.combo_device.addItem("No USB devices found")
+        #     for path, label in self.usb_devices.items():
+        #         self.combo_device.addItem(f"{label} ({path})")
+        # else:
+        #     self.combo_device.addItem("No USB devices found")
         
         device_layout = QVBoxLayout()
         device_layout.setSpacing(2)
