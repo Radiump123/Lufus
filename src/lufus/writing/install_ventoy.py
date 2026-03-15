@@ -3,6 +3,7 @@ import subprocess
 import sys
 import os
 import shutil
+import stat
 import time
 import urllib.request
 import glob
@@ -75,9 +76,18 @@ def install_grub(target_device)->bool:
         subprocess.run(['umount', partition], check=False)
 
     print(f"--- Wiping all signatures from {target_device} ---")
-    subprocess.run(['wipefs', '-a', target_device], check=False)
-    if subprocess.run(['which', 'sgdisk'], capture_output=True).returncode == 0:
-        subprocess.run(['sgdisk', '--zap-all', target_device], check=False)
+    if (
+        target_device
+        and isinstance(target_device, str)
+        and target_device.startswith("/dev/")
+        and os.path.exists(target_device)
+        and stat.S_ISBLK(os.stat(target_device).st_mode)
+    ):
+        subprocess.run(['wipefs', '-a', target_device], check=False)
+        if subprocess.run(['which', 'sgdisk'], capture_output=True).returncode == 0:
+            subprocess.run(['sgdisk', '--zap-all', target_device], check=False)
+    else:
+        pass
 
     # Partitioning Definition
     sfdisk_input = f"""
