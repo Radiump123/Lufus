@@ -409,6 +409,7 @@ def winhardwarebypass():
         #using chntpw to edit the registry file SYSTEM and then also run the commands using stdin
         subprocess.run(['chntpw', 'e', '/media/tempwinmnt/Windows/System32/config/SYSTEM'],  input=cmd_string, text=True, capture_output=True, check=True)
         subprocess.run(['wimunmount', '/media/tempwinmnt', '--commit'], check=True)
+        subprocess.run(['rm', '-rf', '/media/tempwinmnt'], check=True)
         print("Success: Registry keys injected.")
     except subprocess.CalledProcessError as e:
         print(f"Error occurred: {e.stderr}")
@@ -430,9 +431,11 @@ def winlocalacc():
         #using chntpw to edit the registry file SOFTWARE and then also run the commands using stdin
         subprocess.run(['chntpw', 'e', '/media/tempwinmnt/Windows/System32/config/SOFTWARE'],  input=commands, text=True, capture_output=True, check=True)
         subprocess.run(['wimunmount', '/media/tempwinmnt', '--commit'], check=True)
-        wimunmount mount_dir --commit
+        subprocess.run(['rm', '-rf', '/media/tempwinmnt'], check=True)
         print("Success: Online account bypassed.")
-
+    except subprocess.CalledProcessError as e:
+        print(f"Error occurred: {e.stderr}")
+        
 #skip privacy questions in windows
 def winskipprivacyques():
     mount, _, _ = _get_mount_and_drive()
@@ -456,7 +459,7 @@ def winskipprivacyques():
 #creating custom name local account (!) this also includes skip microsoft account (!)
 def winlocalaccname():
     mount, _, _ = _get_mount_and_drive()
-    user_name = 'default'
+    user_name = states.winlocalacc
     ## username CANNOT HAVE \/[]:;|=,+*?<> or be empty!!! need to check for that!
     xml_template = f"""<?xml version="1.0" encoding="utf-8"?>
     <unattend xmlns="urn:schemas-microsoft-com:unattend">
