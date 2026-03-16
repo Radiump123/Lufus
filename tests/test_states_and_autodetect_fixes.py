@@ -9,7 +9,6 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from lufus.drives import states
-import lufus.drives.autodetect_usb as adu_module
 
 
 def _make_monitor():
