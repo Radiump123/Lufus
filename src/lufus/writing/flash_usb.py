@@ -40,7 +40,7 @@ def _strip_partition_suffix(device: str) -> str:
     if m:
         return m.group(1)
     # Standard SCSI/SATA/USB: /dev/sdXN -> /dev/sdX
-    m = re.match(r"^(/dev/[a-z]+)\d+$", device)
+    m = re.match(r"^(/dev/sd[a-z])\d+$", device)
     if m:
         return m.group(1)
     return device
