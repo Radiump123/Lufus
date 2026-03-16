@@ -17,3 +17,7 @@ currentflash = 0
 language = "English"
 verify_hash = False
 expected_hash = ""
+winhardware = 0
+winmicrosoftacc = 0
+winlocalacc = 'default'
+winprivacy = 0

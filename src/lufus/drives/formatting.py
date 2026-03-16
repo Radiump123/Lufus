@@ -2,6 +2,7 @@ import re
 import shlex
 import subprocess
 import sys
+import os
 from pathlib import Path
 from lufus.drives import states
 from lufus.drives import find_usb as fu
@@ -381,3 +382,109 @@ def drive_repair():
         print("SUCCESSFULLY REPAIRED DRIVE (FAT32)")
     except Exception:
         print("COULDN'T REPAIR DRIVE")
+
+'''This file is for defining windows tweaks functions, this includes:
+1. Hardware Requirements Bypass
+2. Making Local Accounts
+3. Disabling privacy questions'''
+# bypass hardware requirements
+def winhardwarebypass():
+    mount, _, _ = _get_mount_and_drive()
+    commands = [
+        "cd Setup",
+        "newkey LabConfig",
+        "cd LabConfig",
+        "addvalue BypassTPMCheck 4 1",
+        "addvalue BypassSecureBootCheck 4 1",
+        "addvalue BypassRAMCheck 4 1",
+        "save",
+        "exit"
+    ]
+    cmd_string = "\n".join(commands) + "\n"
+    try:
+        #creates temporary mount point for the windows iso
+        subprocess.run(['mkdir', '/media/tempwinmnt'], check=True)
+        #mounts the boot.wim file using wimlib
+        subprocess.run(['wimmountrw', f'{mount}/sources/boot.wim', '2', '/media/tempwinmnt'], check=True)
+        #using chntpw to edit the registry file SYSTEM and then also run the commands using stdin
+        subprocess.run(['chntpw', 'e', '/media/tempwinmnt/Windows/System32/config/SYSTEM'],  input=cmd_string, text=True, capture_output=True, check=True)
+        subprocess.run(['wimunmount', '/media/tempwinmnt', '--commit'], check=True)
+        subprocess.run(['rm', '-rf', '/media/tempwinmnt'], check=True)
+        print("Success: Registry keys injected.")
+    except subprocess.CalledProcessError as e:
+        print(f"Error occurred: {e.stderr}")
+
+# ability to make local accounts
+def winlocalacc():
+    mount, _, _ = _get_mount_and_drive()
+    commands = [
+        "cd Microsoft\\Windows\\CurrentVersion\\OOBE\n"
+        "addvalue BypassNRO 4 1\n"
+        "save\n"
+        "exit\n"
+    ]
+    try:
+        #creates temporary mount point for the windows iso
+        subprocess.run(['mkdir', '/media/tempwinmnt'], check=True)
+        #mounts the boot.wim file using wimlib
+        subprocess.run(['wimmountrw', f'{mount}/sources/boot.wim', '2', '/media/tempwinmnt'], check=True)
+        #using chntpw to edit the registry file SOFTWARE and then also run the commands using stdin
+        subprocess.run(['chntpw', 'e', '/media/tempwinmnt/Windows/System32/config/SOFTWARE'],  input=commands, text=True, capture_output=True, check=True)
+        subprocess.run(['wimunmount', '/media/tempwinmnt', '--commit'], check=True)
+        subprocess.run(['rm', '-rf', '/media/tempwinmnt'], check=True)
+        print("Success: Online account bypassed.")
+    except subprocess.CalledProcessError as e:
+        print(f"Error occurred: {e.stderr}")
+        
+#skip privacy questions in windows
+def winskipprivacyques():
+    mount, _, _ = _get_mount_and_drive()
+    xml_content = """<?xml version="1.0" encoding="utf-8"?>
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+    <settings pass="oobeSystem">
+        <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+            <OOBE>
+                <HideEULAPage>true</HideEULAPage>
+                <HidePrivacyExperience>true</HidePrivacyExperience>
+                <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+                <ProtectYourPC>3</ProtectYourPC>
+            </OOBE>
+        </component>
+    </settings>
+</unattend>"""
+    with open(os.path.join(mount, "autounattend.xml"), "w") as f:
+        f.write(xml_content)
+    print("Success: autounattend.xml created to skip privacy screens.")
+
+#creating custom name local account (!) this also includes skip microsoft account (!)
+def winlocalaccname():
+    mount, _, _ = _get_mount_and_drive()
+    user_name = states.winlocalacc
+    ## username CANNOT HAVE \/[]:;|=,+*?<> or be empty!!! need to check for that!
+    xml_template = f"""<?xml version="1.0" encoding="utf-8"?>
+    <unattend xmlns="urn:schemas-microsoft-com:unattend">
+        <settings pass="oobeSystem">
+            <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+                <OOBE>
+                    <HideEULAPage>true</HideEULAPage>
+                    <HidePrivacyExperience>true</HidePrivacyExperience>
+                    <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+                    <ProtectYourPC>3</ProtectYourPC>
+                </OOBE>
+                <UserAccounts>
+                    <LocalAccounts>
+                        <LocalAccount wcm:action="add" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+                            <Password><Value></Value><PlainText>true</PlainText></Password>
+                            <Description>Primary Local Account</Description>
+                            <DisplayName>{user_name}</DisplayName>
+                            <Group>Administrators</Group>
+                            <Name>{user_name}</Name>
+                        </LocalAccount>
+                    </LocalAccounts>
+                </UserAccounts>
+            </component>
+        </settings>
+    </unattend>"""
+    with open(os.path.join(mount, "autounattend.xml"), "w") as f:
+        f.write(xml_content)
+    print("Success: autounattend.xml created to skip privacy screens and created a local account with name ", user_name)
