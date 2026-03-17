@@ -20,8 +20,10 @@ def ensure_root():
             "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR"),
             "PATH": os.environ.get("PATH"),
             "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
-            "PKEXEC_UID": os.environ.get("PKEXEC_UID", str(os.getuid())),
         }
+        if "PKEXEC_UID" in os.environ:
+            gui_env["PKEXEC_UID"] = os.environ["PKEXEC_UID"]
+            
         env_args = ["env"]
         for key, value in gui_env.items():
             if value:

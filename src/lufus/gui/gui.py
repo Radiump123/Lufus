@@ -618,18 +618,29 @@ class lufus(QMainWindow):
             return
 
         if not use_gradient:
-            template = template.replace(
-                "background: qlineargradient(x1:0, y1:0, x2:0, y2:1,\n        stop:0 {colors_input_bg_top},\n        stop:1 {colors_input_bg})",
-                "background-color: {colors_input_bg}"
-            ).replace(
-                "background: qlineargradient(x1:0, y1:0, x2:0, y2:1,\n        stop:0 {colors_button_bg_top},\n        stop:1 {colors_button_bg})",
-                "background-color: {colors_button_bg}"
-            ).replace(
-                "background: qlineargradient(x1:0, y1:0, x2:0, y2:1,\n        stop:0 {colors_button_hover_bg_top},\n        stop:1 {colors_button_hover_bg})",
-                "background-color: {colors_button_hover_bg}"
-            ).replace(
-                "background: qlineargradient(x1:0, y1:0, x2:0, y2:1,\n        stop:0 {colors_tool_button_bg_top},\n        stop:1 {colors_tool_button_bg})",
-                "background-color: {colors_tool_button_bg}"
+            template = re.sub(
+                r"background:\s*qlineargradient\(\s*x1:0,\s*y1:0,\s*x2:0,\s*y2:1,\s*"
+                r"stop:0\s*\{colors_input_bg_top\},\s*stop:1\s*\{colors_input_bg\}\s*\)",
+                "background-color: {colors_input_bg}",
+                template, flags=re.MULTILINE,
+            )
+            template = re.sub(
+                r"background:\s*qlineargradient\(\s*x1:0,\s*y1:0,\s*x2:0,\s*y2:1,\s*"
+                r"stop:0\s*\{colors_button_bg_top\},\s*stop:1\s*\{colors_button_bg\}\s*\)",
+                "background-color: {colors_button_bg}",
+                template, flags=re.MULTILINE,
+            )
+            template = re.sub(
+                r"background:\s*qlineargradient\(\s*x1:0,\s*y1:0,\s*x2:0,\s*y2:1,\s*"
+                r"stop:0\s*\{colors_button_hover_bg_top\},\s*stop:1\s*\{colors_button_hover_bg\}\s*\)",
+                "background-color: {colors_button_hover_bg}",
+                template, flags=re.MULTILINE,
+            )
+            template = re.sub(
+                r"background:\s*qlineargradient\(\s*x1:0,\s*y1:0,\s*x2:0,\s*y2:1,\s*"
+                r"stop:0\s*\{colors_tool_button_bg_top\},\s*stop:1\s*\{colors_tool_button_bg\}\s*\)",
+                "background-color: {colors_tool_button_bg}",
+                template, flags=re.MULTILINE,
             )
 
         self._flat_theme = flat_theme
