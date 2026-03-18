@@ -80,8 +80,6 @@ no_usb_found,USB-пристроїв не знайдено
 dlg_select_image_title,Вибрати образ диска
 dlg_select_image_filter,ISO-образи (*.iso);;Усі файли (*)
 about_content,lufus — це інструмент запису образів дисків написаний на Python для Linux.
-
 Натхненний оригінальним інструментом lufus для Windows.
-
 Версія: 1.0.0
 GitHub: github.com/hog185/lufus
