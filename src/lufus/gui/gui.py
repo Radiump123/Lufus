@@ -49,6 +49,7 @@ from lufus.drives import states
 from lufus.drives.autodetect_usb import UsbMonitor
 from lufus.lufus_logging import get_logger
 from lufus.gui.themes.icon_utils import svg_icon
+from lufus.writing.partition_scheme import PartitionScheme
 
 # themes live here :3
 THEME_DIR = Path(__file__).parent / 'themes'
