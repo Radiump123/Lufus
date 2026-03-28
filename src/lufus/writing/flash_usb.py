@@ -73,8 +73,8 @@ def FlashUSB(iso_path: str, raw_device: str,scheme:PartitionScheme=PartitionSche
             _status(f"Not an ISO file ({os.path.basename(iso_path)}), skipping ISO signature check")
 
         _status("Checking if image contains installation markers...")
-        if is_windows_iso(iso_path):
-            _status("OS Installation media detected, routing to flash_windows (ISO mode)")
+        if is_windows_iso(iso_path) or scheme != PartitionScheme.LINUX:
+            _status(f"Extraction mode requested or Windows ISO detected (scheme={scheme.name}). Routing to flash_windows.")
             return flash_windows(
                 raw_device,
                 iso_path,
@@ -83,7 +83,7 @@ def FlashUSB(iso_path: str, raw_device: str,scheme:PartitionScheme=PartitionSche
                 status_cb=status_cb,
             )
         else:
-            _status("Not a Windows ISO, will use dd for flashing")
+            _status("Using dd for direct imaging (Linux/DD mode)")
 
         dd_args = [
             "dd",

@@ -16,7 +16,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import lufus.writing.flash_usb as flash_usb_module
-from lufus.writing.flash_usb import _strip_partition_suffix, FlashUSB
+from lufus.writing.flash_usb import _strip_partition_suffix, FlashUSB, PartitionScheme
 import lufus.drives.find_usb as find_usb_module
 from lufus.drives.find_usb import _media_directories
 
@@ -145,7 +145,7 @@ class TestFlashUSBNvmeDeviceStrip:
 
         monkeypatch.setattr(flash_usb_module.subprocess, "Popen", FakeProcess)
 
-        FlashUSB(str(iso), "/dev/nvme0n1p1")
+        FlashUSB(str(iso), "/dev/nvme0n1p1", scheme=PartitionScheme.LINUX)
 
         dd_of = next((a for a in popen_calls["args"] if a.startswith("of=")), None)
         assert dd_of == "of=/dev/nvme0n1", f"Expected of=/dev/nvme0n1, got {dd_of}"

@@ -477,8 +477,17 @@ class FlashWorker(QThread):
                                        status_cb=self.status.emit)
                 else:
                     success = False
+            elif image_option == 1: # Linux
+                if states.currentFS == 1: # FAT32
+                    scheme = PartitionScheme.SIMPLE_FAT32
+                else:
+                    scheme = PartitionScheme.LINUX
+                success = FlashUSB(iso_path, device_node,
+                                   scheme,
+                                   progress_cb=self.progress.emit,
+                                   status_cb=self.status.emit)
             else:
-                # other flash modes (Linux, Other)
+                # other flash modes (Other)
                 success = FlashUSB(iso_path, device_node,
                                    PartitionScheme.LINUX,
                                    progress_cb=self.progress.emit,
@@ -1006,10 +1015,12 @@ class lufus(QMainWindow):
         self.btn_start = QPushButton(self._T.get("btn_start", "Start"))
         self.btn_start.setObjectName("btnStart")
         self.btn_start.setMinimumHeight(S.px(40))
+        self.btn_start.setEnabled(True)
         self.btn_start.clicked.connect(self.start_process)
 
         self.btn_cancel = QPushButton(self._T.get("btn_cancel", "Cancel"))
         self.btn_cancel.setMinimumHeight(S.px(40))
+        self.btn_cancel.setEnabled(False)
         self.btn_cancel.clicked.connect(self.cancel_process)
 
         btn_layout = QHBoxLayout()
@@ -1123,7 +1134,7 @@ class lufus(QMainWindow):
         # change available filesystems based on image type :3
         self.combo_fs.blockSignals(True)
         if states.image_option == 1:      # linux
-            self.combo_fs.clear(); self.combo_fs.addItems(["ext4", "UDF"]); self.combo_fs.setCurrentText("ext4")
+            self.combo_fs.clear(); self.combo_fs.addItems(["ext4", "FAT32", "UDF"]); self.combo_fs.setCurrentText("ext4")
         elif states.image_option == 0:    # windows
             self.combo_fs.clear(); self.combo_fs.addItems(["NTFS", "FAT32", "exFAT"]); self.combo_fs.setCurrentText("NTFS")
         elif states.image_option == 4:    # ventoy

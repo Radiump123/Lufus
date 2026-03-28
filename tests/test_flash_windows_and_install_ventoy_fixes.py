@@ -18,6 +18,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import lufus.writing.flash_windows as fw_module
+from lufus.writing.partition_scheme import PartitionScheme
 from lufus.writing.flash_windows import _get_wim_size, _find_path_case_insensitive
 import lufus.writing.install_ventoy as iv_module
 from lufus.writing.install_ventoy import download_wimboot, install_grub
@@ -47,11 +48,11 @@ class TestFlashWindowsOsErrorOnMissingIso:
 
     def test_returns_false_when_iso_does_not_exist(self, tmp_path):
         missing_iso = str(tmp_path / "nonexistent.iso")
-        result = fw_module.flash_windows("/dev/sdb", missing_iso)
+        result = fw_module.flash_windows("/dev/sdb", missing_iso, PartitionScheme.WINDOWS_NTFS)
         assert result is False
 
     def test_returns_false_when_iso_is_a_directory(self, tmp_path):
-        result = fw_module.flash_windows("/dev/sdb", str(tmp_path))
+        result = fw_module.flash_windows("/dev/sdb", str(tmp_path), PartitionScheme.WINDOWS_NTFS)
         assert result is False
 
 class TestGetWimSizeCaseInsensitive:

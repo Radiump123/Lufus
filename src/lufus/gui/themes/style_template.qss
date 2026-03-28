@@ -107,8 +107,8 @@ QPushButton:disabled {{
 
 #btnStart {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 {colors_button_bg_top},
-        stop:1 {colors_button_bg});
+        stop:0 {colors_accent_hover},
+        stop:1 {colors_accent});
     border: 1px solid {colors_border_dark};
     border-radius: {dimensions_btn_radius}px;
     min-height: {dimensions_btn_min_height}px;
@@ -116,14 +116,14 @@ QPushButton:disabled {{
     padding: {dimensions_btn_pad_vertical}px {dimensions_btn_pad_horizontal}px;
     font-family: {fonts_family};
     font-size: {fonts_base}pt;
-    color: {colors_fg};
+    color: {colors_selected_text};
 }}
 
 #btnStart:hover {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 {colors_button_hover_bg_top},
-        stop:1 {colors_button_hover_bg});
-    border-color: {colors_accent};
+        stop:0 {colors_accent},
+        stop:1 {colors_accent_hover});
+    border-color: {colors_selected_text};
 }}
 
 #btnStart:pressed {{
