@@ -1,6 +1,0 @@
-#!/home/raphael/Lufus/.briefcase/lufus/dev.cpython-312-x86_64-linux-gnu/bin/python
-import sys
-from pytest import console_main
-if __name__ == '__main__':
-    sys.argv[0] = sys.argv[0].removesuffix('.exe')
-    sys.exit(console_main())
