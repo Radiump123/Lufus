@@ -14,7 +14,6 @@ from glob import glob
 import urllib.parse
 import webbrowser
 from pathlib import Path
-from packaging import version
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -464,14 +463,15 @@ class FlashWorker(QThread):
                 if flash_mode == 0:
                     # iso mode for microslop windows
                     # passing user selected filesystem
-                    if states.currentFS == 0:
-                      scheme=PartitionScheme.WINDOWS_NTFS
-                    elif states.currentFS == 1:
-                      scheme=PartitionScheme.SIMPLE_FAT32
-                    elif states.currentFS == 2:
-                      scheme=PartitionScheme.WINDOWS_EXFAT
-                    else:
-                      scheme=PartitionScheme.LINUX
+                    #if states.currentFS == 0:
+                    #  scheme=PartitionScheme.WINDOWS_NTFS
+                    #elif states.currentFS == 1:
+                    #  scheme=PartitionScheme.SIMPLE_FAT32
+                    #elif states.currentFS == 2:
+                    #  scheme=PartitionScheme.WINDOWS_EXFAT
+                    #else:
+                    #  scheme=PartitionScheme.LINUX
+                    scheme=PartitionScheme.SIMPLE_FAT32
                     success = FlashUSB(iso_path, device_node,
                                        scheme,
                                        progress_cb=self.progress.emit,
@@ -529,7 +529,8 @@ class lufus(QMainWindow):
         win_h = min(int(Scale.DESIGN_H * scale), int(screen.height() * 1.2))
         ui_factor = win_w / Scale.DESIGN_W
         self._S = Scale(QApplication.instance(), factor=ui_factor)
-        self.setFixedSize(win_w, win_h)#oink
+        self.resize(win_w, win_h) #oink
+        self.setMinimumSize(int(win_w * 0.6), int(win_h * 0.6))
 
         # initialize worker threads and windows :3
         self.flash_worker = None
@@ -940,7 +941,9 @@ class lufus(QMainWindow):
         self.combo_badblocks.addItem(self._T.get("combo_badblocks_2pass", "2 Pass"))
         self.combo_badblocks.addItem(self._T.get("combo_badblocks_3pass", "3 Pass"))
         self.combo_badblocks.setEnabled(False)
+        self.combo_badblocks.setMaximumHeight(0)
         self.chk_badblocks.stateChanged.connect(self.update_check_bad)
+        self.update_check_bad()
 
         # sha256 verification checkbox and input :D
         self.chk_verify = QCheckBox(self._T.get("chk_verify_hash", "Verify SHA256 Checksum"))
@@ -948,7 +951,9 @@ class lufus(QMainWindow):
         self.input_hash = QLineEdit()
         self.input_hash.setPlaceholderText(self._T.get("input_hash_placeholder", "Enter expected SHA256 hash here..."))
         self.input_hash.setEnabled(False)
+        self.input_hash.setMaximumHeight(0)
         self.input_hash.textChanged.connect(self.update_expected_hash)
+        self.update_verify_hash()
 
         # layout for all checkboxes :3
         chk_layout = QVBoxLayout()
@@ -1128,7 +1133,9 @@ class lufus(QMainWindow):
         if states.image_option == 1:      # linux
             self.combo_fs.clear(); self.combo_fs.addItems(["ext4", "UDF"]); self.combo_fs.setCurrentText("ext4")
         elif states.image_option == 0:    # windows
-            self.combo_fs.clear(); self.combo_fs.addItems(["NTFS", "FAT32", "exFAT"]); self.combo_fs.setCurrentText("NTFS")
+            self.combo_fs.clear()
+            #self.combo_fs.addItems(["NTFS", "FAT32", "exFAT"]); self.combo_fs.setCurrentText("NTFS")
+            self.combo_fs.addItems(["FAT32"]); self.combo_fs.setCurrentText("FAT32")
         elif states.image_option == 4:    # ventoy
             self.combo_fs.clear(); self.combo_fs.addItems(["exFAT", "FAT32"]); self.combo_fs.setCurrentText("exFAT")
         elif states.image_option in (2, 3):
@@ -1213,16 +1220,38 @@ class lufus(QMainWindow):
         states.create_extended = 0 if self.chk_extended.isChecked() else 1
         self.log_message(f"Create extended label/icon files: {'enabled' if self.chk_extended.isChecked() else 'disabled'}")
 
+    def _animate_widget(self, widget, show: bool, anim_attr: str):
+        anim = QPropertyAnimation(widget, b"maximumHeight")
+        anim.setDuration(80)
+
+        if show:
+            widget.show()  # IMPORTANT
+            anim.setStartValue(0)
+            anim.setEndValue(self._S.px(36))
+            anim.finished.connect(lambda: widget.setMaximumHeight(16777215))
+        else:
+            anim.setStartValue(widget.maximumHeight())
+            anim.setEndValue(0)
+            anim.finished.connect(widget.hide)
+
+        anim.start()
+        setattr(self, anim_attr, anim)
+
+
+        
     def update_check_bad(self):
         # update bad blocks check setting and enable pass selector :3
         states.check_bad = 0 if self.chk_badblocks.isChecked() else 1
-        self.combo_badblocks.setEnabled(self.chk_badblocks.isChecked())
+        show = self.chk_badblocks.isChecked()
+        self.combo_badblocks.setEnabled(show)
+        self._animate_widget(self.combo_badblocks, show, "_anim_badblocks")
         self.log_message(f"Bad block check: {'enabled' if self.chk_badblocks.isChecked() else 'disabled'}")
 
     def update_verify_hash(self):
         # update sha256 verification setting :D
         states.verify_hash = self.chk_verify.isChecked()
         self.input_hash.setEnabled(states.verify_hash)
+        self._animate_widget(self.input_hash, states.verify_hash, "_anim_hash")
         self.log_message(f"SHA256 verification: {'enabled' if states.verify_hash else 'disabled'}")
 
     def update_expected_hash(self, text):
