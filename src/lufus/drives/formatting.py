@@ -91,7 +91,7 @@ def unmount(drive: str = None):
     log.info("Unmounting %s...", drive)
     for target in targets:
         try:
-            subprocess.run(["umount", "-a", "-l", target])
+            subprocess.run(["umount", "-l", target])
             time.sleep(0.5)
             log.info("Unmounted %s successfully.", target)
         except subprocess.CalledProcessError:
