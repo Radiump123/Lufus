@@ -8,6 +8,6 @@ Lufus is a fully open source program and is developed and maintained by voluntee
 
 For translation, please open a PR with the translation file. You may also contact Hog on Discord.
 It is highly recommended to go through the whole documentation before trying to contribute to the source code.
-It is also important to go through the [Guidelines and Standards](internals/B_Guidelines_and_Standards.md).
+<!-- It is also important to go through the [Guidelines and Standards](internals/B_Guidelines_and_Standards.md). -->
 
 You can join our Discord server to further enquire about anything Lufus related.
