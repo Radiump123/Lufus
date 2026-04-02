@@ -1,3 +1,4 @@
+version = "v0.1.0a1"
 currentFS: int = 0
 image_option: int = 0
 partition_scheme: int = 0

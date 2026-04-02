@@ -4,6 +4,8 @@ import shutil
 import subprocess
 import sys
 import os
+import glob
+import time
 from pathlib import Path
 from lufus.drives import states
 from lufus.drives import find_usb as fu
@@ -85,20 +87,28 @@ def unmount(drive: str = None):
     if not drive:
         log.error("No drive node found. Cannot unmount.")
         return
+    targets = glob.glob(f"{drive}*")
     log.info("Unmounting %s...", drive)
-    try:
-        subprocess.run(["umount", drive], check=True)
-        log.info("Unmounted %s successfully.", drive)
-    except subprocess.CalledProcessError:
-        UnmountFail()
-    except Exception as e:
-        log.error("(UMNTFUNC) Unexpected error type: %s — %s", type(e).__name__, e)
-        unexpected()
-
+    for target in targets:
+        try:
+            subprocess.run(["umount", "-l", target])
+            time.sleep(0.5)
+            log.info("Unmounted %s successfully.", target)
+        except subprocess.CalledProcessError:
+            UnmountFail()
+        except Exception as e:
+            log.error("(UMNTFUNC) Unexpected error type: %s — %s", type(e).__name__, e)
+            unexpected()
+    subprocess.run(["udevadm", "settle"])
+    time.sleep(0.5)
 
 #mountain
-def remount():
-    mount, drive, _ = _get_mount_and_drive()
+def remount(drive: str=None):
+    if not drive:
+        mount, drive, _ = _get_mount_and_drive()
+    if not drive:
+        log.error("No drive node found. Cannot unmount.")
+        return
     if not drive or not mount:
         log.error("No drive node or mount point found. Cannot remount.")
         return
@@ -290,13 +300,13 @@ def dskformat(status_cb=None) -> bool:
     # Get the raw device (whole disk, not partition)
     raw_device = _get_raw_device(drive)
     
-    try:
-        _status(f"Unmounting {drive} before formatting...")
-        subprocess.run(["umount", drive], check=True)
-    except subprocess.CalledProcessError:
-        _status(f"WARNING: Failed to unmount {drive}. It may already be unmounted or in use.")
-    except Exception as e:
-        _status(f"WARNING: Unexpected unmount error: {type(e).__name__}: {e}")  
+    # try:
+    #     _status(f"Unmounting {drive} before formatting...")
+    #     subprocess.run(["umount", "-l", f"{drive}*"], shell=True, check=True)
+    # except subprocess.CalledProcessError:
+    #     _status(f"WARNING: Failed to unmount {drive}. It may already be unmounted or in use.")
+    # except Exception as e:
+    #     _status(f"WARNING: Unexpected unmount error: {type(e).__name__}: {e}")  
 
     fs_type = getattr(states, 'currentFS', 0)
     clusters = cluster1
@@ -330,7 +340,7 @@ def dskformat(status_cb=None) -> bool:
     elif fs_type == 1:  # FAT32
         try:
             tool = _find_tool("mkfs.vfat")
-            cmd = [tool, "-s", str(sectors), "-F", "32", raw_device]
+            cmd = [tool, "-I", "-s", str(sectors), "-F", "32", raw_device]
             _status(f"Running: {' '.join(cmd)}")
             subprocess.run(cmd, check=True)
             _status(f"Successfully formatted {raw_device} as FAT32.")

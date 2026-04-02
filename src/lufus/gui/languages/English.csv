@@ -108,3 +108,31 @@ status_format_in_progress,Formatting drive...
 status_format_complete,Format complete!
 status_format_failed,Format FAILED. Check the log above for the exact error.
 status_flash_error,Flash error: {error}
+acc_device,Device selector
+acc_device_desc,Select the USB device you want to use
+acc_refresh,Refresh devices
+acc_refresh_desc,Scan for connected USB devices
+acc_boot,Boot image selector
+acc_boot_desc,Shows the currently selected image file
+acc_select,Browse for image file
+acc_image_option,Image option selector
+acc_image_option_desc,Choose the type of image to write: Windows, Linux, Other, or Format Only
+acc_volume_label,Volume label input
+acc_volume_label_desc,Enter a name for the USB volume
+acc_filesystem,File system selector
+acc_cluster,Cluster size selector
+acc_flash_option,Flash method selector
+acc_quick_format,Quick format checkbox
+acc_extended_label,Create extended label checkbox
+acc_bad_blocks,Check for bad blocks checkbox
+acc_bad_blocks_passes,Bad block check passes selector
+acc_verify_hash,Verify SHA256 checksum checkbox
+acc_hash_input,Expected SHA256 hash input
+acc_hash_input_desc,Paste the expected 64-character SHA256 hash here
+acc_progress,Operation progress bar
+acc_start,Start operation
+acc_cancel,Cancel operation
+acc_website,Open Lufus website
+acc_about,About Lufus
+acc_settings,Open settings
+acc_log,Open log window

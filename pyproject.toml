@@ -24,6 +24,8 @@ requires = [
     "psutil>=7.2.2",
     "pyqt6>=6.10.2",
     "pyudev>=0.24.4",
+    "requests",
+    "packaging",
     "platformdirs>=4.9.4"
 ]
 test_requires = [
@@ -135,5 +137,7 @@ dependencies = [
     "psutil>=7.2.2",
     "pyqt6>=6.10.2",
     "pyudev>=0.24.4",
+    "requests",
+    "packaging",
     "platformdirs>=4.9.4"
 ]

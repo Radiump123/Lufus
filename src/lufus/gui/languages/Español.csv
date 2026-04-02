@@ -105,3 +105,31 @@ status_format_in_progress,Formateando disco...
 status_format_complete,¡Formateo completado!
 status_format_failed,Formateo FALLIDO. Comprueba el registro anterior para ver el error exacto.
 status_flash_error,Error de flasheo: {error}
+acc_device,Selector de dispositivo
+acc_device_desc,Seleccione el dispositivo USB que desea usar
+acc_refresh,Actualizar dispositivos
+acc_refresh_desc,Escanear dispositivos USB conectados
+acc_boot,Selector de imagen de arranque
+acc_boot_desc,Muestra el archivo de imagen seleccionado actualmente
+acc_select,Buscar archivo de imagen
+acc_image_option,Selector de tipo de imagen
+acc_image_option_desc,Elija el tipo de imagen a escribir: Windows, Linux, Otro, o Solo Formatear
+acc_volume_label,Campo de etiqueta de volumen
+acc_volume_label_desc,Introduzca un nombre para el volumen USB
+acc_filesystem,Selector de sistema de archivos
+acc_cluster,Selector de tamaño de clúster
+acc_flash_option,Selector de método de grabación
+acc_quick_format,Casilla de formateo rápido
+acc_extended_label,Casilla de etiqueta extendida
+acc_bad_blocks,Casilla de comprobación de bloques defectuosos
+acc_bad_blocks_passes,Selector de pasadas de comprobación
+acc_verify_hash,Casilla de verificación SHA256
+acc_hash_input,Campo de hash SHA256 esperado
+acc_hash_input_desc,Pegue aquí el hash SHA256 esperado de 64 caracteres
+acc_progress,Barra de progreso de operación
+acc_start,Iniciar operación
+acc_cancel,Cancelar operación
+acc_website,Abrir el sitio web de Lufus
+acc_about,Acerca de Lufus
+acc_settings,Abrir configuración
+acc_log,Abrir ventana de registro

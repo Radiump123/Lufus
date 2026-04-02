@@ -6,6 +6,8 @@ import os
 import csv
 import platform
 import getpass
+import time
+import requests
 from typing import Dict, Any
 from platformdirs import user_config_dir
 from datetime import datetime
@@ -287,7 +289,6 @@ class AboutWindow(QDialog):
 
         self.setLayout(layout)
 
-
 class SettingsDialog(QDialog):
     # signals for when settings change :D
     language_changed = pyqtSignal(str)
@@ -386,6 +387,7 @@ class SettingsDialog(QDialog):
 class VerifyWorker(QThread):
     # worker thread for sha256 verification >:D
     progress = pyqtSignal(str)
+    int_progress = pyqtSignal(int)
     flash_done = pyqtSignal(bool)
 
     def __init__(self, iso_path: str, expected_hash: str):
@@ -397,10 +399,27 @@ class VerifyWorker(QThread):
     def run(self):
         # run verification in background thread :3
         try:
-            from lufus.writing.check_file_sig import check_sha256
+            import hashlib
+            p = Path(self.iso_path)
+            if not p.is_file():
+                self.progress.emit(f"Verification error: file not found: {self.iso_path}")
+                self.flash_done.emit(False)
+                return
+            file_size = p.stat().st_size
             self.progress.emit(f"Verifying SHA256 checksum for {self.iso_path}...")
-            result = check_sha256(self.iso_path, self.expected_hash)
-            self.flash_done.emit(result)
+            normalized = self.expected_hash.strip().lower()
+            sha256 = hashlib.sha256()
+            bytes_read = 0
+            with p.open("rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    sha256.update(chunk)
+                    bytes_read += len(chunk)
+                    pct = min(int(bytes_read * 100 / file_size), 99) if file_size > 0 else 0
+                    self.int_progress.emit(pct)
+            calculated = sha256.hexdigest()
+            if calculated != normalized:
+                self.progress.emit(f"SHA256 mismatch: expected {normalized}, got {calculated}")
+            self.flash_done.emit(calculated == normalized)
         except Exception as e:
             self.progress.emit(f"Verification error: {str(e)}")
             self.flash_done.emit(False)
@@ -454,6 +473,9 @@ class FlashWorker(QThread):
                 self.progress.emit(50)
                 success = fo.dskformat(status_cb=self.status.emit)
                 if success:
+                    self.progress.emit(80)
+                    self.status.emit(self._T.get("status_remounting", "Remounting {part}...").format(part=part))
+                    fo.remount(part)
                     self.progress.emit(100)
                     self.status.emit(self._T.get("status_format_complete", "Format complete!"))
                 else:
@@ -463,14 +485,15 @@ class FlashWorker(QThread):
                 if flash_mode == 0:
                     # iso mode for microslop windows
                     # passing user selected filesystem
-                    if states.currentFS == 0:
-                      scheme=PartitionScheme.WINDOWS_NTFS
-                    elif states.currentFS == 1:
-                      scheme=PartitionScheme.SIMPLE_FAT32
-                    elif states.currentFS == 2:
-                      scheme=PartitionScheme.WINDOWS_EXFAT
-                    else:
-                      scheme=PartitionScheme.LINUX
+                    #if states.currentFS == 0:
+                    #  scheme=PartitionScheme.WINDOWS_NTFS
+                    #elif states.currentFS == 1:
+                    #  scheme=PartitionScheme.SIMPLE_FAT32
+                    #elif states.currentFS == 2:
+                    #  scheme=PartitionScheme.WINDOWS_EXFAT
+                    #else:
+                    #  scheme=PartitionScheme.LINUX
+                    scheme=PartitionScheme.SIMPLE_FAT32
                     success = FlashUSB(iso_path, device_node,
                                        scheme,
                                        progress_cb=self.progress.emit,
@@ -500,7 +523,6 @@ class FlashWorker(QThread):
         finally:
             # restore stdout :D
             sys.stdout = _saved_stdout
-
 
 # log level mapping for colors and methods
 _LOG_LEVELS = {
@@ -538,7 +560,8 @@ class lufus(QMainWindow):
         win_h = min(int(Scale.DESIGN_H * scale), int(screen.height() * 1.2))
         ui_factor = win_w / Scale.DESIGN_W
         self._S = Scale(QApplication.instance(), factor=ui_factor)
-        self.setFixedSize(win_w, win_h)#oink
+        self.resize(win_w, win_h) #oink
+        self.setMinimumSize(int(win_w * 0.6), int(win_h * 0.6))
 
         # initialize worker threads and windows :3
         self.flash_worker = None
@@ -553,6 +576,9 @@ class lufus(QMainWindow):
             self.is_terminal = sys.stdout.isatty()
         except (AttributeError, OSError):
             pass
+
+        self._flash_start_time = None
+        self._flash_total_bytes = 0
 
         # redirect stdout to log :D
         sys.stdout = StdoutRedirector(self.log_message)
@@ -581,6 +607,9 @@ class lufus(QMainWindow):
         self.flash_worker = None
         self.log_message(f"UI scale factor: {self._S.f():.3f}  (base 96 DPI)")
         self._check_latest_download()
+
+        # check for new updates function call
+        QTimer.singleShot(100, self.get_latest_release)
 
     def _check_latest_download(self):
         if getattr(states, "iso_path", ""):
@@ -946,7 +975,9 @@ class lufus(QMainWindow):
         self.combo_badblocks.addItem(self._T.get("combo_badblocks_2pass", "2 Pass"))
         self.combo_badblocks.addItem(self._T.get("combo_badblocks_3pass", "3 Pass"))
         self.combo_badblocks.setEnabled(False)
+        self.combo_badblocks.setMaximumHeight(0)
         self.chk_badblocks.stateChanged.connect(self.update_check_bad)
+        self.update_check_bad()
 
         # sha256 verification checkbox and input :D
         self.chk_verify = QCheckBox(self._T.get("chk_verify_hash", "Verify SHA256 Checksum"))
@@ -954,7 +985,9 @@ class lufus(QMainWindow):
         self.input_hash = QLineEdit()
         self.input_hash.setPlaceholderText(self._T.get("input_hash_placeholder", "Enter expected SHA256 hash here..."))
         self.input_hash.setEnabled(False)
+        self.input_hash.setMaximumHeight(0)
         self.input_hash.textChanged.connect(self.update_expected_hash)
+        self.update_verify_hash()
 
         # layout for all checkboxes :3
         chk_layout = QVBoxLayout()
@@ -1042,7 +1075,14 @@ class lufus(QMainWindow):
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage(self._T.get("status_ready", "Ready"), 0)
 
+        self._lbl_speed_eta = QLabel("")
+        self._lbl_speed_eta.setObjectName("speedEtaLabel")
+        self._lbl_speed_eta.setMinimumWidth(S.px(220))
+        self._lbl_speed_eta.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.statusBar.addPermanentWidget(self._lbl_speed_eta)
+
         self.update_image_option()
+        self._apply_accessible_names()
 
     def create_refresh_button(self):
         # create refresh button for usb device list :3
@@ -1136,7 +1176,9 @@ class lufus(QMainWindow):
         if states.image_option == 1:      # linux
             self.combo_fs.clear(); self.combo_fs.addItems(["ext4", "FAT32", "UDF"]); self.combo_fs.setCurrentText("ext4")
         elif states.image_option == 0:    # windows
-            self.combo_fs.clear(); self.combo_fs.addItems(["NTFS", "FAT32", "exFAT"]); self.combo_fs.setCurrentText("NTFS")
+            self.combo_fs.clear()
+            #self.combo_fs.addItems(["NTFS", "FAT32", "exFAT"]); self.combo_fs.setCurrentText("NTFS")
+            self.combo_fs.addItems(["FAT32"]); self.combo_fs.setCurrentText("FAT32")
         elif states.image_option == 4:    # ventoy
             self.combo_fs.clear(); self.combo_fs.addItems(["exFAT", "FAT32"]); self.combo_fs.setCurrentText("exFAT")
         elif states.image_option in (2, 3):
@@ -1221,16 +1263,38 @@ class lufus(QMainWindow):
         states.create_extended = 0 if self.chk_extended.isChecked() else 1
         self.log_message(f"Create extended label/icon files: {'enabled' if self.chk_extended.isChecked() else 'disabled'}")
 
+    def _animate_widget(self, widget, show: bool, anim_attr: str):
+        anim = QPropertyAnimation(widget, b"maximumHeight")
+        anim.setDuration(80)
+
+        if show:
+            widget.show()  # IMPORTANT
+            anim.setStartValue(0)
+            anim.setEndValue(self._S.px(36))
+            anim.finished.connect(lambda: widget.setMaximumHeight(16777215))
+        else:
+            anim.setStartValue(widget.maximumHeight())
+            anim.setEndValue(0)
+            anim.finished.connect(widget.hide)
+
+        anim.start()
+        setattr(self, anim_attr, anim)
+
+
+        
     def update_check_bad(self):
         # update bad blocks check setting and enable pass selector :3
         states.check_bad = 0 if self.chk_badblocks.isChecked() else 1
-        self.combo_badblocks.setEnabled(self.chk_badblocks.isChecked())
+        show = self.chk_badblocks.isChecked()
+        self.combo_badblocks.setEnabled(show)
+        self._animate_widget(self.combo_badblocks, show, "_anim_badblocks")
         self.log_message(f"Bad block check: {'enabled' if self.chk_badblocks.isChecked() else 'disabled'}")
 
     def update_verify_hash(self):
         # update sha256 verification setting :D
         states.verify_hash = self.chk_verify.isChecked()
         self.input_hash.setEnabled(states.verify_hash)
+        self._animate_widget(self.input_hash, states.verify_hash, "_anim_hash")
         self.log_message(f"SHA256 verification: {'enabled' if states.verify_hash else 'disabled'}")
 
     def update_expected_hash(self, text):
@@ -1508,6 +1572,7 @@ class lufus(QMainWindow):
             self.combo_device.clear()
             self.combo_device.addItem(self._T.get("no_usb_found", "No USB devices found"), None)
         self._update_flashing_options()
+        self._apply_accessible_names()
 
     def get_selected_mount_path(self) -> str:
         # get device path from selected combo item :3
@@ -1571,6 +1636,7 @@ class lufus(QMainWindow):
             self.btn_start.setEnabled(True)
             self.btn_cancel.setEnabled(False)
             self.statusBar.showMessage(self._T.get("status_ready", "Ready"), 0)
+            self._clear_speed_eta()
             self.log_message("Flash process cancelled by user", level="WARN")
 
     def start_process(self):
@@ -1610,9 +1676,13 @@ class lufus(QMainWindow):
             self.btn_cancel.setEnabled(True)
             self.progress_bar.setValue(0)
             self.progress_bar.setFormat(self._T.get("progress_verifying", "Verifying..."))
-# if you are reading this, fuck you
+            self._flash_start_time = time.monotonic()
+            self._flash_total_bytes = os.path.getsize(states.iso_path) if Path(states.iso_path).exists() else 0
+            # if you are reading this, fuck you
             self.verify_worker = VerifyWorker(states.iso_path, states.expected_hash)
             self.verify_worker.progress.connect(self.log_message)
+            self.verify_worker.int_progress.connect(self._update_speed_eta, Qt.ConnectionType.QueuedConnection)
+            self.verify_worker.int_progress.connect(self.progress_bar.setValue, Qt.ConnectionType.QueuedConnection)
             self.verify_worker.flash_done.connect(self.on_verify_finished)
             self.verify_worker.start()
         else:
@@ -1623,6 +1693,7 @@ class lufus(QMainWindow):
         # handle verification result :D
         if success:
             self.log_message("SHA256 verification successful, proceeding to flash")
+            self._clear_speed_eta()
             self.perform_flash()
         else:
             # verification failed  (╯°□°)╯( ┻━┻
@@ -1633,6 +1704,7 @@ class lufus(QMainWindow):
             self.btn_cancel.setEnabled(False)
             self.progress_bar.setValue(0)
             self.progress_bar.setFormat("")
+            self._clear_speed_eta()
 
     def perform_flash(self):
         # perform actual flash operation :D
@@ -1701,9 +1773,13 @@ class lufus(QMainWindow):
             os.execvp(pkexec_path, cmd)
         else:
             # already root start flash worker :D
+            iso_path = options.get("iso_path", "")
+            self._flash_start_time = time.monotonic()
+            self._flash_total_bytes = os.path.getsize(iso_path) if iso_path and Path(iso_path).exists() else 0
             self.log_message(f"Starting flash thread: image_option={options['image_option']}, flash_mode={options['currentflash']}, device={options['device']}")
             self.flash_worker = FlashWorker(options, self._T)
             self.flash_worker.progress.connect(self.progress_bar.setValue, Qt.ConnectionType.QueuedConnection)
+            self.flash_worker.progress.connect(self._update_speed_eta, Qt.ConnectionType.QueuedConnection)
             self.flash_worker.status.connect(self._on_flash_status, Qt.ConnectionType.QueuedConnection)
             self.flash_worker.flash_done.connect(self.on_flash_finished, Qt.ConnectionType.QueuedConnection)
             self.flash_worker.start()
@@ -1730,10 +1806,14 @@ class lufus(QMainWindow):
             self.log_message(f"Auto-flash failed to load options: {e}", level="ERROR")
 
     def _start_flash_with_options(self, options: dict) -> None:
-        # start flashworker directly with prebuilt options dict :3
+        # start flashworker directly with prebuilt options dict :3  
+        iso_path = options.get("iso_path", "")
+        self._flash_start_time = time.monotonic()
+        self._flash_total_bytes = os.path.getsize(iso_path) if iso_path and Path(iso_path).exists() else 0
         self.log_message(f"Starting flash: image_option={options['image_option']}, flash_mode={options['currentflash']}, device={options['device']}")
         self.flash_worker = FlashWorker(options, self._T)
         self.flash_worker.progress.connect(self.progress_bar.setValue, Qt.ConnectionType.QueuedConnection)
+        self.flash_worker.progress.connect(self._update_speed_eta, Qt.ConnectionType.QueuedConnection)
         self.flash_worker.status.connect(self._on_flash_status, Qt.ConnectionType.QueuedConnection)
         self.flash_worker.flash_done.connect(self.on_flash_finished, Qt.ConnectionType.QueuedConnection)
         self.flash_worker.start()
@@ -1775,6 +1855,76 @@ class lufus(QMainWindow):
         self.btn_start.setEnabled(True)
         self.btn_cancel.setEnabled(False)
         self.statusBar.showMessage(self._T.get("status_ready", "Ready"), 0)
+        self._clear_speed_eta()
+
+    def _update_speed_eta(self, pct: int) -> None:
+        if self._flash_start_time is None or pct <= 0:
+            return
+        elapsed = time.monotonic() - self._flash_start_time
+        if elapsed < 0.5:
+            return
+        if self._flash_total_bytes > 0:
+            bytes_done = int(pct / 100 * self._flash_total_bytes)
+            speed = bytes_done / elapsed
+            if speed > 0:
+                remaining = self._flash_total_bytes - bytes_done
+                eta_sec = remaining / speed
+                if speed >= 1024 * 1024:
+                    speed_str = f"{speed / (1024 * 1024):.1f} MB/s"
+                elif speed >= 1024:
+                    speed_str = f"{speed / 1024:.1f} KB/s"
+                else:
+                    speed_str = f"{speed:.0f} B/s"
+                if eta_sec >= 3600:
+                    eta_str = f"{int(eta_sec // 3600)}h {int((eta_sec % 3600) // 60)}m"
+                elif eta_sec >= 60:
+                    eta_str = f"{int(eta_sec // 60)}m {int(eta_sec % 60)}s"
+                else:
+                    eta_str = f"{int(eta_sec)}s"
+                self._lbl_speed_eta.setText(f"{speed_str}  ETA {eta_str}")
+                return
+        if elapsed >= 3600:
+            e_str = f"{int(elapsed // 3600)}h {int((elapsed % 3600) // 60)}m"
+        elif elapsed >= 60:
+            e_str = f"{int(elapsed // 60)}m {int(elapsed % 60)}s"
+        else:
+            e_str = f"{int(elapsed)}s"
+        self._lbl_speed_eta.setText(f"Elapsed: {e_str}")
+
+    def _clear_speed_eta(self) -> None:
+        self._flash_start_time = None
+        self._flash_total_bytes = 0
+        self._lbl_speed_eta.setText("")
+
+    def _apply_accessible_names(self) -> None:
+        self.combo_device.setAccessibleName(self._T.get("acc_device", "Device selector"))
+        self.combo_device.setAccessibleDescription(self._T.get("acc_device_desc", "Select the USB device to flash"))
+        self.btn_refresh.setAccessibleName(self._T.get("acc_refresh", "Refresh devices"))
+        self.btn_refresh.setAccessibleDescription(self._T.get("acc_refresh_desc", "Scan for connected USB devices"))
+        self.combo_boot.setAccessibleName(self._T.get("acc_boot", "Boot image selector"))
+        self.combo_boot.setAccessibleDescription(self._T.get("acc_boot_desc", "Shows the currently selected boot image file"))
+        self.btn_select.setAccessibleName(self._T.get("acc_select", "Browse for image file"))
+        self.combo_image_option.setAccessibleName(self._T.get("acc_image_option", "Image option selector"))
+        self.combo_image_option.setAccessibleDescription(self._T.get("acc_image_option_desc", "Choose the type of image to write: Windows, Linux, Other, or Format Only"))
+        self.input_label.setAccessibleName(self._T.get("acc_volume_label", "Volume label input"))
+        self.input_label.setAccessibleDescription(self._T.get("acc_volume_label_desc", "Enter a name for the USB volume"))
+        self.combo_fs.setAccessibleName(self._T.get("acc_filesystem", "File system selector"))
+        self.combo_cluster.setAccessibleName(self._T.get("acc_cluster", "Cluster size selector"))
+        self.combo_flash.setAccessibleName(self._T.get("acc_flash_option", "Flash method selector"))
+        self.chk_quick.setAccessibleName(self._T.get("acc_quick_format", "Quick format checkbox"))
+        self.chk_extended.setAccessibleName(self._T.get("acc_extended_label", "Create extended label checkbox"))
+        self.chk_badblocks.setAccessibleName(self._T.get("acc_bad_blocks", "Check for bad blocks checkbox"))
+        self.combo_badblocks.setAccessibleName(self._T.get("acc_bad_blocks_passes", "Bad block check passes selector"))
+        self.chk_verify.setAccessibleName(self._T.get("acc_verify_hash", "Verify SHA256 checksum checkbox"))
+        self.input_hash.setAccessibleName(self._T.get("acc_hash_input", "Expected SHA256 hash input"))
+        self.input_hash.setAccessibleDescription(self._T.get("acc_hash_input_desc", "Paste the expected 64-character SHA256 hash here"))
+        self.progress_bar.setAccessibleName(self._T.get("acc_progress", "Operation progress bar"))
+        self.btn_start.setAccessibleName(self._T.get("acc_start", "Start operation"))
+        self.btn_cancel.setAccessibleName(self._T.get("acc_cancel", "Cancel operation"))
+        self.btn_icon1.setAccessibleName(self._T.get("acc_website", "Open Lufus website"))
+        self.btn_icon2.setAccessibleName(self._T.get("acc_about", "About Lufus"))
+        self.btn_icon3.setAccessibleName(self._T.get("acc_settings", "Open settings"))
+        self.btn_icon4.setAccessibleName(self._T.get("acc_log", "Open log window"))
 
     def keyPressEvent(self, event):
         # handle keyboard shortcuts :3
@@ -1808,6 +1958,42 @@ class lufus(QMainWindow):
             # if pgrep fails assume agent might be present better to try :D
             return True
 
+    def get_latest_release(self):
+        owner = 'Hog185'
+        repo = 'Lufus'
+        url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+        current_version = states.version
+        try:
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                if version.parse(data['tag_name']) > version.parse(current_version):
+                    self.log_message(f"New version found: {data['tag_name']} > {current_version}", level="DEBUG")
+                    pass
+                else:
+                    self.log_message(f"Running latest release build: {data['tag_name']} <= {current_version}", level="INFO")
+                    return
+            else:
+                self.log_message(f"Couldn't get latest release, response: {response.status_code}", level="WARNING")
+                return
+        except Exception as e:
+            self.log_message(f"Update check failed: {e}", level="ERROR")
+            return
+        newupdate = QMessageBox(self)
+        newupdate.setWindowTitle("New Update Available!")
+        newupdate.setText(f"A new version ({data['tag_name']}) is available!")
+        newupdate.setInformativeText(f"Would you like to download {data['name']} now?")
+        download_btn = newupdate.addButton(QMessageBox.StandardButton.Apply)
+        download_btn.setText("Download Now")
+        later_btn = newupdate.addButton(QMessageBox.StandardButton.Discard)
+        later_btn.setText("Later")
+        newupdate.setIcon(QMessageBox.Icon.Information)
+        newupdate.exec()
+        if newupdate.clickedButton() == download_btn:
+            self.log_message(f"New update download button clicked", level="DEBUG")
+            webbrowser.open("https://github.com/Hog185/Lufus/releases")
+        else:
+            self.log_message(f"download later button clicked", level="DEBUG")
 
 if __name__ == "__main__":
     # setup high dpi scaling :3
