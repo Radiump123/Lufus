@@ -580,14 +580,18 @@ class lufus(QMainWindow):
         QTimer.singleShot(0, self._apply_styles)
         self.update_usb_list(self.monitor.devices)
         self.setAcceptDrops(True)
-
+        # icon stuff
+        SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+        icon_path = os.path.join(SCRIPT_DIR, 'assets', 'icons', 'lufuslogo.ico')
+        self.setWindowIcon(QIcon(icon_path))
+        QApplication.setWindowIcon(QIcon(icon_path))
         # start clipboard monitoring :3
         self._clipboard_timer = QTimer(self)
         self._clipboard_timer.timeout.connect(self._check_clipboard)
         self._clipboard_timer.start(500)
 
         # log startup info :D
-        self.log_message("lufus started")
+        self.log_message(f"lufus started (version: {states.version})")
         self.log_message(
             f"Python {sys.version.split()[0]} | {platform.system()} {platform.release()} {platform.machine()}"
         )

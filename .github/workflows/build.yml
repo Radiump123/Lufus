@@ -7,6 +7,7 @@ on:
       - "*-beta"
 
 jobs:
+  # for appimage
   build-appimage:
     runs-on: ubuntu-latest
     permissions:
@@ -57,3 +58,49 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref, '-beta') }}
           generate_release_notes: true
+  
+  # for binary
+  build-tarball:
+      needs: build-appimage
+      runs-on: ubuntu-latest
+      permissions:
+        contents: write
+      steps:
+        - uses: actions/checkout@v4
+
+        - name: Set up Python
+          uses: actions/setup-python@v5
+          with:
+            python-version: "3.13"
+
+        - name: Install dependencies
+          run: |
+            pip install pyinstaller PyQt6 psutil pyudev requests packaging platformdirs
+
+        - name: Build with PyInstaller
+          run: |
+            pyinstaller --noconfirm --onedir --windowed \
+            --icon "src/lufus/gui/assets/icons/lufuslogo.ico" \
+            --paths "./src" \
+            --add-data "src/lufus/gui/assets:lufus/gui/assets" \
+            --add-data "src/lufus/gui/languages:lufus/gui/languages" \
+            --add-data "src/lufus/gui/themes:lufus/gui/themes" \
+            --collect-all PyQt6 \
+            --name "Lufus-x86_64-${{ github.ref_name }}" \
+            "src/lufus/__main__.py"
+
+        - name: Create Tarball and Checksum
+          run: |
+            cd dist
+            tar -cvzf ../Lufus-x86_64-${{ github.ref_name }}.tar.gz Lufus-x86_64-${{ github.ref_name }}
+            cd ..
+            sha256sum Lufus-x86_64-${{ github.ref_name }}.tar.gz > Lufus-x86_64-${{ github.ref_name }}.tar.gz.sha256
+
+        - name: Upload to Release
+          uses: softprops/action-gh-release@v2
+          with:
+            tag_name: ${{ github.ref_name }}
+            files: |
+              Lufus-x86_64-${{ github.ref_name }}.tar.gz
+              Lufus-x86_64-${{ github.ref_name }}.tar.gz.sha256
+            append_body: true
