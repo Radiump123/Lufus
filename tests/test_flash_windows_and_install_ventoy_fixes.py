@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
+from lufus.writing.partition_scheme import PartitionScheme
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -47,11 +48,11 @@ class TestFlashWindowsOsErrorOnMissingIso:
 
     def test_returns_false_when_iso_does_not_exist(self, tmp_path):
         missing_iso = str(tmp_path / "nonexistent.iso")
-        result = fw_module.flash_windows("/dev/sdb", missing_iso)
+        result = fw_module.flash_windows("/dev/sdb", missing_iso, PartitionScheme.WINDOWS_NTFS)
         assert result is False
 
     def test_returns_false_when_iso_is_a_directory(self, tmp_path):
-        result = fw_module.flash_windows("/dev/sdb", str(tmp_path))
+        result = fw_module.flash_windows("/dev/sdb", str(tmp_path), PartitionScheme.WINDOWS_NTFS)
         assert result is False
 
 class TestGetWimSizeCaseInsensitive:
