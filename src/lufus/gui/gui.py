@@ -62,6 +62,38 @@ _LOG_LEVELS = {
 }
 
 
+class BackgroundWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._bg_pixmap = None
+
+    def set_background(self, image_path):
+        # load and cache bg pixmap :3
+        if image_path and Path(image_path).is_file():
+            from PyQt6.QtGui import QPixmap
+            self._bg_pixmap = QPixmap(str(image_path))
+        else:
+            self._bg_pixmap = None
+        self.update()
+
+    def paintEvent(self, event):
+        if self._bg_pixmap and not self._bg_pixmap.isNull():
+            from PyQt6.QtGui import QPainter
+            painter = QPainter(self)
+            # scale to fill widget keeping aspect ratio, centre-cropped :D
+            scaled = self._bg_pixmap.scaled(
+                self.size(),
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            x = (self.width() - scaled.width()) // 2
+            y = (self.height() - scaled.height()) // 2
+            painter.drawPixmap(x, y, scaled)
+            painter.end()
+        else:
+            super().paintEvent(event)
+
+
 class lufus(QMainWindow):
     def __init__(self, usb_devices=None, scale: Scale = None):
         super().__init__()
@@ -77,6 +109,19 @@ class lufus(QMainWindow):
         # load translations :D
         self.current_language = getattr(states, "language", "English")
         self._T = load_translations(self.current_language)
+
+        # restore theme from env when relaunched as root via pkexec :3
+        env_theme = os.environ.get("LUFUS_THEME", "")
+        if env_theme:
+            states.theme = env_theme
+
+        # load persisted theme from config when not set via env :3
+        if not getattr(states, "theme", ""):
+            try:
+                _theme_cfg = Path(user_config_dir("Lufus")) / "active_theme"
+                states.theme = _theme_cfg.read_text(encoding="utf-8").strip()
+            except Exception:
+                pass
 
         self.setWindowTitle(self._T.get("window_title", "lufus"))
 
@@ -186,10 +231,9 @@ class lufus(QMainWindow):
         theme_dir = Path(__file__).parent / 'themes'
         template_path = theme_dir / 'style_template.qss'
         user_config_dir_path = Path(user_config_dir(APP_NAME, roaming=True))
-        user_theme_path = user_config_dir_path / 'user_theme.json'
 
         # resolve which theme folder to use :3
-        theme_name = getattr(states, "theme", "default")
+        theme_name = getattr(states, "theme", "") or "default"
         user_themes_dir = user_config_dir_path / "themes"
         builtin_json = theme_dir / theme_name / f'{theme_name}_theme.json'
         user_json = user_themes_dir / theme_name / f'{theme_name}_theme.json'
@@ -210,23 +254,49 @@ class lufus(QMainWindow):
             print("WARNING: no theme applied, json didn't load up in _apply_styles, gui.py.")
             return
 
-        if os.path.exists(user_theme_path):
-            try:
-                # merge user theme overrides
-                with open(user_theme_path, 'r', encoding='utf-8') as fr:
-                    user_theme = json.load(fr)
-                for category in ['colors', 'fonts', 'dimensions']:
-                    if category in user_theme and isinstance(user_theme[category], dict):
-                        theme[category].update(user_theme[category])
-            except Exception as e:
-                print(f"Error loading user theme: {e}")
-
         # check if gradients are enabled :3
         use_gradient = int(theme['dimensions'].get('use_gradient', 1))
 
         # keys that dont need scaling
         NO_SCALE_KEYS = {'use_gradient', 'btn_border_width', 'combo_border_width'}
         NO_SCALE_FONT_KEYS = {'family'}
+
+        # sensible defaults for every key the QSS template may reference :3
+        _DIM_DEFAULTS = {
+            'combo_pad_vertical':    4,
+            'combo_pad_horizontal':  10,
+            'combo_height':          28,
+            'combo_dropdown_width':  20,
+            'combo_radius':          6,
+            'btn_radius':            6,
+            'btn_pad_vertical':      6,
+            'btn_pad_horizontal':    14,
+            'btn_min_height':        28,
+            'btn_min_width':         80,
+            'btn_border_width':      1,
+            'combo_border_width':    1,
+            'check_indicator_size':  16,
+            'progress_radius':       4,
+            'progress_height':       20,
+            'tool_border_radius':    4,
+            'tool_padding':          4,
+            'tool_size':             28,
+            'use_gradient':          1,
+        }
+        _FONT_DEFAULTS = {
+            'family': 'sans-serif',
+            'base':   10,
+            'small':  9,
+            'header': 13,
+            'tool':   10,
+            'label':  10,
+        }
+
+        # merge defaults under any missing keys :D
+        for k, v in _DIM_DEFAULTS.items():
+            theme['dimensions'].setdefault(k, v)
+        for k, v in _FONT_DEFAULTS.items():
+            theme['fonts'].setdefault(k, v)
 
         # create scaled theme dict :D
         scaled_theme = {
@@ -301,20 +371,25 @@ class lufus(QMainWindow):
                 bg_image_path = candidate
                 break
 
-        if bg_image_path:
-            style_sheet += f"""
-QMainWindow {{
-    background-image: url({bg_image_path.as_posix()});
-    background-position: center center;
-    background-repeat: no-repeat;
-    background-attachment: fixed;
-}}
-QWidget#centralWidget, QScrollArea, QWidget#scrollContent {{
-    background: transparent;
-}}
-"""
+        # build final stylesheet, appending transparency rules if a bg image is active :3
+        if hasattr(self, "_bg_widget") and bg_image_path:
+            style_sheet += (
+                "QWidget#centralWidget, QScrollArea, QWidget#scrollContent"
+                " { background: transparent; }"
+            )
 
         QApplication.instance().setStyleSheet(style_sheet)
+
+        # push bg image to widget - paintEvent handles scaling :D
+        if hasattr(self, "_bg_widget"):
+            self._bg_widget.set_background(bg_image_path)
+
+        # force every widget to re-evaluate the new stylesheet :D
+        for widget in QApplication.instance().allWidgets():
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
+            widget.update()
+
         if hasattr(self, "btn_icon1"):
             self.apply_icons()
 
@@ -369,8 +444,9 @@ QWidget#centralWidget, QScrollArea, QWidget#scrollContent {{
         GROUP_SPACING = S.px(5)
 
         # create central widget with scroll area
-        central_widget = QWidget()
+        central_widget = BackgroundWidget()
         central_widget.setObjectName("centralWidget")
+        self._bg_widget = central_widget
         self.setCentralWidget(central_widget)
         outer_layout = QVBoxLayout(central_widget)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -1051,6 +1127,13 @@ QWidget#centralWidget, QScrollArea, QWidget#scrollContent {{
         user_json = user_config_dir_path / "themes" / theme_name / f'{theme_name}_theme.json'
         if builtin_json.exists() or user_json.exists():
             states.theme = theme_name
+            # persist so it survives restarts without needing the env var :3
+            try:
+                _theme_cfg = user_config_dir_path / "active_theme"
+                _theme_cfg.parent.mkdir(parents=True, exist_ok=True)
+                _theme_cfg.write_text(theme_name, encoding="utf-8")
+            except Exception:
+                pass
             self._apply_styles()
             self.log_message(f"Theme changed to: {theme_name}")
             if self.about_window and self.about_window.isVisible():
@@ -1300,6 +1383,7 @@ QWidget#centralWidget, QScrollArea, QWidget#scrollContent {{
                 "XDG_RUNTIME_DIR":  os.environ.get("XDG_RUNTIME_DIR"),
                 "PATH":             os.environ.get("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"),
                 "PYTHONPATH":       os.environ.get("PYTHONPATH", ""),
+                "LUFUS_THEME":      getattr(states, "theme", ""),
             }
             env_args = ["env"]
             for key, value in gui_env.items():

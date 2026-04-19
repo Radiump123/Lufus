@@ -118,14 +118,14 @@ class AboutWindow(QDialog):
         # main title label fuh u
         lbl_title = QLabel("Lufus")
         lbl_title.setObjectName("aboutTitle")
-        lbl_title.setStyleSheet(f"font-family: {font_family}; font-size: {self._S.pt(20) if self._S else 20}pt; font-weight: bold; color: {fg_color};")
+        lbl_title.setStyleSheet(f"font-family: {font_family}; font-size: {self._S.pt(20) if self._S else 20}pt; font-weight: bold;")
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl_title)
 
         # subtitle label fuh u
         lbl_sub = QLabel(self._T.get("about_subtitle", "USB Flash Tool"))
         lbl_sub.setObjectName("aboutSubtitle")
-        lbl_sub.setStyleSheet(f"font-family: {font_family}; font-size: {tool_pt}pt; color: {fg_color};")
+        lbl_sub.setStyleSheet(f"font-family: {font_family}; font-size: {tool_pt}pt;")
         lbl_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl_sub)
 
@@ -140,7 +140,7 @@ class AboutWindow(QDialog):
         self.about_text.setReadOnly(True)
         self.about_text.setObjectName("aboutContent")
         self.about_text.setFrameShape(QFrame.Shape.NoFrame)
-        self.about_text.setStyleSheet(f"font-family: {font_family}; font-size: {tool_pt}pt; color: {fg_color};")
+        self.about_text.setStyleSheet(f"font-family: {font_family}; font-size: {tool_pt}pt;")
         layout.addWidget(self.about_text, 1)
 
         btn_row = QHBoxLayout()

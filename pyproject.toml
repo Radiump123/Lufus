@@ -21,12 +21,12 @@ test_sources = [
     "tests",
 ]
 requires = [
-    "psutil>=7.2.2",
-    "pyqt6>=6.10.2",
+    "psutil>=7.2",
+    "pyqt6>=6.8.0",
     "pyudev>=0.24.4",
     "requests",
     "packaging",
-    "platformdirs>=4.9.4"
+    "platformdirs>=4.2"
 ]
 test_requires = [
     "pytest",
@@ -61,10 +61,8 @@ system_runtime_requires = [
     "exfatprogs",
     "e2fsprogs",
     "udftools",
-    "hfsprogs",
     "btrfs-progs",
     "xfsprogs",
-    "zfsutils-linux",
 ]
 [tool.briefcase.app.lufus.linux.system.rhel]
 system_requires = [
@@ -80,7 +78,6 @@ system_runtime_requires = [
     "hfsplus-tools",
     "btrfs-progs",
     "xfsprogs",
-    "zfs",
 ]
 [tool.briefcase.app.lufus.linux.system.suse]
 system_requires = [
@@ -94,10 +91,8 @@ system_runtime_requires = [
     "exfatprogs",
     "e2fsprogs",
     "udftools",
-    "hfsplus-tools",
     "btrfs-progs",
     "xfsprogs",
-    "zfs",
 ]
 [tool.briefcase.app.lufus.linux.system.arch]
 system_requires = [
@@ -110,10 +105,8 @@ system_runtime_requires = [
     "exfatprogs",
     "e2fsprogs",
     "udftools",
-    "hfsprogs",
     "btrfs-progs",
     "xfsprogs",
-    "zfs-utils",
 ]
 [tool.briefcase.app.lufus.linux.appimage]
 manylinux = "manylinux_2_28"
