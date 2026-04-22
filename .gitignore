@@ -1,44 +1,60 @@
-# Built docs
-site/
-
+```
 # Python
 __pycache__/
-.pytest_cache/
-tests/__pycache__
-*.py[cod]
+*.pyc
 *.pyo
 *.pyd
 .Python
-
-# Virtual environments
+env/
 venv/
 .venv/
-env/
+.ENV
+.venv.bak/
+pip-log.txt
+pip-delete-this-directory.txt
 
-# Distribution / packaging
+# Build artifacts
 build/
+develop-eggs/
 dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
 *.egg-info/
+.installed.cfg
 *.egg
-src/lufus.dist-info/*
+
+# Testing
+.coverage
+coverage/
+htmlcov/
+.nosetests
+.unit_test_results.xml
+.tox/
+.coverage.*
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*.tmp
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+*.env.*
 
 # OS
 .DS_Store
 Thumbs.db
-
-# Logs
-*.log
-/.vs
-
-# :3 :3 :3 :3
-*.AppImage
-AppDir
-*.spec
-site/
-.desloppify/
+```

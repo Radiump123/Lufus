@@ -199,7 +199,8 @@ class SettingsDialog(QDialog):
         # add builtin and custom themes
         self.combo_theme.addItems(builtin)
         self.combo_theme.addItems(custom)
-        current_theme = getattr(states, "Theme", "Default")
+        # use the same attribute and casing convention as the rest of the theme handling
+        current_theme = getattr(states, "theme", "default")
         for i in range(self.combo_theme.count()):
             # select current theme
             if self.combo_theme.itemText(i) == current_theme:

@@ -94,8 +94,9 @@ class FlashWorker(QThread):
                 success = fo.dskformat(status_cb=self.status.emit)
                 if success:
                     self.progress.emit(80)
-                    self.status.emit(self._T.get("status_remounting", "Remounting {part}...").format(part=part))
-                    fo.remount(part)
+                    # remount the base device (dskformat operates on the whole disk)
+                    self.status.emit(self._T.get("status_remounting", "Remounting {device}...").format(device=device_node))
+                    fo.remount(device_node)
                     self.progress.emit(100)
                     self.status.emit(self._T.get("status_format_complete", "Format complete!"))
                 else:
