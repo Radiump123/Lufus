@@ -291,6 +291,10 @@ class lufus(QMainWindow):
             'tool':   10,
             'label':  10,
         }
+        
+        theme.setdefault('dimensions', {})
+        theme.setdefault('fonts', {})
+        theme.setdefault('colors', {})
 
         # merge defaults under any missing keys :D
         for k, v in _DIM_DEFAULTS.items():
@@ -321,6 +325,28 @@ class lufus(QMainWindow):
         for category, subdict in scaled_theme.items():
             for key, val in subdict.items():
                 flat_theme[f"{category}_{key}"] = val
+
+        fg_color = theme['colors'].get('fg', '#000000')
+        arrow_size = S.px(10)
+
+        def _tinted_arrow_path(name: str) -> str:
+            src = ASSETS_DIR / 'icons' / name
+            if src.is_file():
+                try:
+                    svg_data = src.read_text(encoding='utf-8')
+                    svg_data = svg_data.replace('currentColor', fg_color)
+                    import hashlib
+                    sig = hashlib.md5(f"{src}{fg_color}".encode()).hexdigest()[:8]
+                    tmp_path = Path(tempfile.gettempdir()) / f"lufus_arrow_{sig}.svg"
+                    tmp_path.write_text(svg_data, encoding='utf-8')
+                    return tmp_path.as_posix()
+                except Exception:
+                    pass
+            return ""
+
+        flat_theme['meta_arrow_down'] = _tinted_arrow_path('down_arrow.svg')
+        flat_theme['meta_arrow_up']   = _tinted_arrow_path('up_arrow.svg')
+        flat_theme['dimensions_arrow_size'] = arrow_size
 
         try:
             # load qss template
