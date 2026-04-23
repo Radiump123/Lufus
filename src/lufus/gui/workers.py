@@ -62,7 +62,8 @@ class FlashWorker(QThread):
         _saved_stdout = sys.stdout
         sys.stdout = sys.__stdout__
         try:
-            from lufus.drives import states, formatting as fo
+            from lufus import state as states
+            from lufus.drives import formatting as fo
             from lufus.writing.flash_usb import FlashUSB
             import glob
 
@@ -134,3 +135,4 @@ class FlashWorker(QThread):
         finally:
             # restore stdout :D
             sys.stdout = _saved_stdout
+
