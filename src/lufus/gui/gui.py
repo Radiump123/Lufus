@@ -8,6 +8,7 @@ import getpass
 import time
 import requests
 import urllib.parse
+import urllib.request
 import webbrowser
 from typing import Dict, Any
 from packaging import version
@@ -1710,3 +1711,4 @@ if __name__ == "__main__":
     window = LufusWindow(usb_devices)
     window.show()
     sys.exit(app.exec()) # oink meow meow meow :3
+
