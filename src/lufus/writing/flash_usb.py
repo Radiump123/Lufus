@@ -67,8 +67,8 @@ def flash_usb(
 
         dd_args = [
             "dd",
-            f"if={shlex.quote(iso_path)}",
-            f"of={shlex.quote(device)}",
+            f"if={iso_path}",
+            f"of={device}",
             "bs=4M",
             "status=progress",
             "conv=fsync",
@@ -76,7 +76,7 @@ def flash_usb(
         ]
 
         _status(f"Spawning dd: {' '.join(dd_args)}")
-        _status(f"Writing {iso_size:,} bytes to {device}, this may take several minutes...")
+        _status(f"Writing {iso_size:,} bytes to {shlex.quote(device)}, this may take several minutes...")
 
         try:
             process = subprocess.Popen(dd_args, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL)

@@ -425,6 +425,50 @@ def test_unmount_calls_unmount_fail_and_returns_false_on_error(monkeypatch) -> N
     assert unmount_fail_calls, "unmount_fail should be called when umount fails"
 
 
+def test_unmount_handles_multiple_partitions(monkeypatch) -> None:
+    mount = "/media/testuser/USB"
+    drive = "/dev/sdb1"
+
+    monkeypatch.setattr(formatting, "_get_mount_and_drive", lambda: (mount, drive, {}))
+    monkeypatch.setattr(formatting.glob, "glob", lambda *a, **kw: [f"{drive}1", f"{drive}2"])
+
+    calls = []
+    monkeypatch.setattr(formatting.subprocess, "run", lambda cmd, *a, **kw: calls.append(cmd))
+
+    result = formatting.unmount()
+
+    assert result is True
+    assert len(calls) == 3
+    assert calls[0][0] == "umount"
+    assert calls[1][0] == "umount"
+    assert calls[2][0] == "udevadm"
+
+
+def test_remount_calls_format_fail_and_returns_false_on_error(monkeypatch) -> None:
+    mount = "/media/testuser/USB"
+    drive = "/dev/sdb1"
+
+    monkeypatch.setattr(formatting, "_get_mount_and_drive", lambda: (mount, drive, {}))
+    monkeypatch.setattr(formatting.glob, "glob", lambda *a, **kw: [drive])
+
+    format_fail_calls = []
+
+    def fake_run(cmd, *a, **kw):
+        raise formatting.subprocess.CalledProcessError(returncode=1, cmd=cmd)
+
+    monkeypatch.setattr(formatting.subprocess, "run", fake_run)
+
+    def fake_format_fail(*args, **kwargs):
+        format_fail_calls.append((args, kwargs))
+
+    monkeypatch.setattr(formatting, "format_fail", fake_format_fail)
+
+    result = formatting.remount()
+
+    assert result is False
+    assert format_fail_calls, "format_fail should be called when remount fails"
+
+
 def test_remount_issues_mount_command(monkeypatch) -> None:
     mount = "/media/testuser/USB"
     drive = "/dev/sdb1"
