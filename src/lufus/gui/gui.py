@@ -98,7 +98,7 @@ class BackgroundWidget(QWidget):
             super().paintEvent(event)
 
 
-class lufus(QMainWindow):
+class LufusWindow(QMainWindow):
     def __init__(self, usb_devices=None, scale: Scale = None):
         super().__init__()
         # main window initialization :3
@@ -1747,6 +1747,6 @@ if __name__ == "__main__":
             print(f"Error parsing USB devices: {e}")
 
     # create and show main window :D
-    window = lufus(usb_devices)
+    window = LufusWindow(usb_devices)
     window.show()
     sys.exit(app.exec())  # oink meow meow meow :3
