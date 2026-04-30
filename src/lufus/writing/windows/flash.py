@@ -232,6 +232,11 @@ def _copy_with_wim_split(iso_mount, mount_data, extract_used, _status, _emit):
     wim_src = _find_path_case_insensitive(iso_mount, "sources", "install.wim") or _find_path_case_insensitive(
         iso_mount, "sources", "install.esd"
     )
+    if not wim_src:
+        _status("No install.wim/esd found, using direct copy instead")
+        _copy_direct(iso_mount, mount_data, extract_used, _status, _emit)
+        return
+
     wim_dst = os.path.join(dst_sources, "install.swm")
     _status(f"Splitting {wim_src} -> {wim_dst} (max 3.8 GiB chunks)...")
     _ensure_wimlib(status_cb=_status)
