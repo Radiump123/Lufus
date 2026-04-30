@@ -1,5 +1,6 @@
 import os
 import re
+import shlex
 import subprocess
 from lufus.utils import strip_partition_suffix
 from lufus.writing.check_file_sig import check_iso_signature
@@ -66,8 +67,8 @@ def flash_usb(
 
         dd_args = [
             "dd",
-            f"if={iso_path}",
-            f"of={device}",
+            f"if={shlex.escape(iso_path)}",
+            f"of={shlex.escape(device)}",
             "bs=4M",
             "status=progress",
             "conv=fsync",
