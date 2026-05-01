@@ -23,12 +23,41 @@ def _load_initial_theme():
         pass
 
 
+def _show_root_warning() -> None:
+    from PyQt6.QtWidgets import QApplication, QMessageBox
+    from PyQt6.QtCore import QTimer
+    import sys
+
+    app = QApplication(sys.argv)
+    msg = QMessageBox()
+    msg.setIcon(QMessageBox.Icon.Warning)
+    msg.setWindowTitle("Root Privileges Required")
+    msg.setText("This application must run as root.")
+    msg.setInformativeText(
+        "To run Lufus as root, you need:\n"
+        "• pkexec (from polkit package)\n"
+        "• polkit (policy kit) installed on your system\n\n"
+        "Please install these packages via your distribution's package manager.\n"
+        "Example: sudo apt install polkit (Debian/Ubuntu)\n"
+        "         sudo dnf install polkit (Fedora)\n"
+        "         sudo pacman -S polkit (Arch)"
+    )
+    msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+    msg.exec()
+
+    app.quit()
+
+
 def launch_gui_with_usb_data() -> None:
+    elevation_attempted = False
     if os.geteuid() != 0:
         _load_initial_theme()
+        elevation_attempted = True
         elevate_privileges()
-        # If elevation failed or was cancelled, we still try to run as user
-        # or we might have exited. If we are here, we are either root or user.
+
+    if elevation_attempted and os.geteuid() != 0:
+        _show_root_warning()
+        sys.exit(1)
 
     usb_devices = find_usb()
     log.info("Launching GUI with USB devices: %s", usb_devices)
