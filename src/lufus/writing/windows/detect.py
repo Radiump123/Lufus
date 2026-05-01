@@ -88,5 +88,29 @@ def is_windows_iso(iso_path: str) -> bool:
     except Exception as e:
         log.error("Windows detection: blkid error: %s: %s", type(e).__name__, e)
 
-    log.info("Windows detection: result -> NOT a Windows ISO")
+def is_linux_iso(iso_path: str) -> bool:
+    """Detect if an ISO is a Linux distribution."""
+    log.info("Linux detection: checking %s", iso_path)
+    try:
+        # Check for common Linux markers in the ISO using 7z
+        result = subprocess.run(["7z", "l", iso_path], capture_output=True, text=True, timeout=15)
+        if result.returncode == 0:
+            files = result.stdout.lower()
+            linux_markers = [
+                "/isolinux/",
+                "/boot/grub/",
+                "/arch/",
+                "/ubuntu/",
+                "/debian/",
+                "/fedora/",
+                "vmlinuz",
+                "initrd",
+            ]
+            for marker in linux_markers:
+                if marker in files:
+                    log.info("Linux detection: found marker %r -> Linux ISO confirmed", marker)
+                    return True
+    except Exception as e:
+        log.error("Linux detection error: %s", e)
+
     return False

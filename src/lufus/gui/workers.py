@@ -111,16 +111,9 @@ class FlashWorker(QThread):
 
             elif image_option == 0:  # Windows
                 if flash_mode == 0:
-                    # iso mode for microslop windows
-                    # passing user selected filesystem
-                    # if states.currentFS == 0:
-                    #  scheme=PartitionScheme.WINDOWS_NTFS
-                    # elif states.currentFS == 1:
-                    #  scheme=PartitionScheme.SIMPLE_FAT32
-                    # elif states.currentFS == 2:
-                    #  scheme=PartitionScheme.WINDOWS_EXFAT
-                    # else:
-                    #  scheme=PartitionScheme.LINUX
+                    # ISO mode for Windows (uses specialized flash_windows)
+                    # For Windows, we currently default to SIMPLE_FAT32 partition scheme
+                    # which handles splitting install.wim if necessary.
                     scheme = PartitionScheme.SIMPLE_FAT32
                     success = flash_usb(
                         device_node, iso_path, scheme, progress_cb=self.progress.emit, status_cb=self.status.emit
@@ -128,11 +121,20 @@ class FlashWorker(QThread):
                 else:
                     success = False
             else:
-                # other flash modes (Linux, Other)
+                # Other flash modes (Linux, Other)
+                fs_text = options.get("fs_text", "ext4")
+                scheme_map = {
+                    "ext4": PartitionScheme.LINUX,
+                    "FAT32": PartitionScheme.SIMPLE_FAT32,
+                    "exFAT": PartitionScheme.WINDOWS_EXFAT,
+                    "UDF": PartitionScheme.LINUX,  # Generic catch-all for now
+                }
+                scheme = scheme_map.get(fs_text, PartitionScheme.LINUX)
+                
                 success = flash_usb(
                     device_node,
                     iso_path,
-                    PartitionScheme.LINUX,
+                    scheme,
                     progress_cb=self.progress.emit,
                     status_cb=self.status.emit,
                 )

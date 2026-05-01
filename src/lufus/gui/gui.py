@@ -227,6 +227,7 @@ class LufusWindow(QMainWindow):
         self.input_label.setText(clean_name.rsplit(".", 1)[0].upper())
         self.log_message(f"Latest download auto-loaded: {latest}")
         self.log_message(f"Image size: {file_size:,} bytes ({file_size / (1024**3):.2f} GiB)")
+        self._detect_iso_and_update_ui(str(latest))
 
     def _apply_styles(self) -> None:
         # load json values apply via qss all that yap is in the themes folder :3
@@ -850,7 +851,7 @@ class LufusWindow(QMainWindow):
         self.combo_fs.blockSignals(True)
         if state.image_option == 1:  # linux
             self.combo_fs.clear()
-            self.combo_fs.addItems(["ext4", "UDF"])
+            self.combo_fs.addItems(["ext4", "FAT32", "exFAT", "UDF"])
             self.combo_fs.setCurrentText("ext4")
         elif state.image_option == 0:  # windows
             self.combo_fs.clear()
@@ -1069,6 +1070,7 @@ class LufusWindow(QMainWindow):
             self.input_label.setText(clean_name.split(".")[0].upper())
             self.log_message(f"Image selected via drag-and-drop: {file_name}")
             self.log_message(f"Image size: {file_size:,} bytes ({file_size / (1024**3):.2f} GiB)")
+            self._detect_iso_and_update_ui(file_name)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -1090,6 +1092,25 @@ class LufusWindow(QMainWindow):
             self.input_label.setText(clean_name.split(".")[0].upper())
             self.log_message(f"Image selected: {file_name}")
             self.log_message(f"Image size: {file_size:,} bytes ({file_size / (1024**3):.2f} GiB)")
+            self._detect_iso_and_update_ui(file_name)
+
+            def _detect_iso_and_update_ui(self, iso_path: str):
+            """Automatically detect ISO type and update UI selectors."""
+            from lufus.writing.windows.detect import is_windows_iso, is_linux_iso
+
+            if not iso_path.lower().endswith(".iso"):
+                return
+
+            self.log_message(f"Detecting ISO type for: {iso_path}...")
+            if is_windows_iso(iso_path):
+                self.log_message("Detected Windows ISO")
+                self.combo_image_option.setCurrentIndex(0)  # Windows
+            elif is_linux_iso(iso_path):
+                self.log_message("Detected Linux ISO")
+                self.combo_image_option.setCurrentIndex(1)  # Linux
+            else:
+                self.log_message("Unknown ISO type, defaulting to Other")
+                self.combo_image_option.setCurrentIndex(2)  # Other
 
     def show_log(self):
         # show log window with all entries :D
@@ -1408,9 +1429,9 @@ class LufusWindow(QMainWindow):
             "device": self.get_selected_mount_path(),
             "image_option": state.image_option,
             "flash_mode": state.flash_mode,
+            "currentflash": state.flash_mode,  # for backward compatibility in workers if needed
             "filesystem_index": state.filesystem_index,
-            # "partition_scheme": state.partition_scheme,
-            # "target_system": state.target_system,
+            "fs_text": self.combo_fs.currentText(),
             "cluster_size": state.cluster_size,
             "quick_format": state.quick_format,
             "create_extended": state.create_extended,
@@ -1420,73 +1441,27 @@ class LufusWindow(QMainWindow):
             "expected_hash": state.expected_hash,
         }
 
-        if os.geteuid() != 0:
-            # not root so relaunch with pkexec :3
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
-                json.dump(options, tmp)
-                opts_path = tmp.name
+        # Root elevation is now handled at startup in start_gui.py.
+        # We assume we have root here, or the user chose to run without it.
 
-            # preserve display session variables so the root gui can render :D
-            gui_env = {
-                "DISPLAY": os.environ.get("DISPLAY"),
-                "XAUTHORITY": os.environ.get("XAUTHORITY") or os.path.expanduser("~/.Xauthority"),
-                "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY"),
-                "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR"),
-                "PATH": os.environ.get("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"),
-                "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
-                "LUFUS_THEME": getattr(state, "theme", ""),
-            }
-            env_args = ["env"]
-            for key, value in gui_env.items():
-                if value:
-                    env_args.append(f"{key}={value}")
-
-            import shutil
-
-            pkexec_path = shutil.which("pkexec") or "/usr/bin/pkexec"
-            if not os.path.isfile(pkexec_path):
-                # pkexec not found  (╯°□°)╯( ┻━┻
-                self.log_message("Error: pkexec not found. Please install policykit-1 or run as root.", level="ERROR")
-                return
-
-            # build relaunch command :D
-            appimage = os.environ.get("APPIMAGE")
-            executable = appimage if appimage else sys.executable
-            base_args = sys.argv[1:] if appimage else sys.argv[:]
-            # strip any previous flash now args to avoid duplication on reexec :3
-            clean_args = []
-            skip_next = False
-            for a in base_args:
-                if skip_next:
-                    skip_next = False
-                    continue
-                if a == "--flash-now":
-                    skip_next = True
-                    continue
-                clean_args.append(a)
-
-            cmd = [pkexec_path] + env_args + [executable] + clean_args + ["--flash-now", opts_path]
-            self.log_message("Relaunching as root via pkexec for flash operation...")
-            os.execvp(pkexec_path, cmd)
-        else:
-            # already root start flash worker :D
-            iso_path = options.get("iso_path", "")
-            self._flash_start_time = time.monotonic()
-            self._flash_total_bytes = os.path.getsize(iso_path) if iso_path and Path(iso_path).exists() else 0
-            self.log_message(
-                f"Starting flash thread: image_option={options['image_option']}, flash_mode={options['currentflash']}, device={options['device']}"
-            )
-            self.flash_worker = FlashWorker(options, self._T)
-            self.flash_worker.progress.connect(self._on_progress, Qt.ConnectionType.QueuedConnection)
-            self.flash_worker.status.connect(self._on_flash_status, Qt.ConnectionType.QueuedConnection)
-            self.flash_worker.flash_done.connect(self.on_flash_finished, Qt.ConnectionType.QueuedConnection)
-            self.flash_worker.start()
-            self.btn_start.setEnabled(False)
-            self.btn_cancel.setEnabled(True)
-            self.progress_bar.setRange(0, 0)
-            self.progress_bar.setValue(0)
-            self._speed_timer.start()
-            self.statusBar.showMessage(self._T.get("status_flashing", "Flashing..."), 0)
+        # already root start flash worker :D
+        iso_path = options.get("iso_path", "")
+        self._flash_start_time = time.monotonic()
+        self._flash_total_bytes = os.path.getsize(iso_path) if iso_path and Path(iso_path).exists() else 0
+        self.log_message(
+            f"Starting flash thread: image_option={options['image_option']}, flash_mode={options['flash_mode']}, device={options['device']}"
+        )
+        self.flash_worker = FlashWorker(options, self._T)
+        self.flash_worker.progress.connect(self._on_progress, Qt.ConnectionType.QueuedConnection)
+        self.flash_worker.status.connect(self._on_flash_status, Qt.ConnectionType.QueuedConnection)
+        self.flash_worker.flash_done.connect(self.on_flash_finished, Qt.ConnectionType.QueuedConnection)
+        self.flash_worker.start()
+        self.btn_start.setEnabled(False)
+        self.btn_cancel.setEnabled(True)
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setValue(0)
+        self._speed_timer.start()
+        self.statusBar.showMessage(self._T.get("status_flashing", "Flashing..."), 0)
 
     def _do_autoflash(self) -> None:
         # called after init when launched with flash now :3

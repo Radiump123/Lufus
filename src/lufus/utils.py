@@ -2,6 +2,35 @@ import os
 import re
 
 
+def elevate_privileges() -> None:
+    """Relaunch the application with root privileges using pkexec."""
+    import sys
+    import subprocess
+    from lufus import state
+
+    # LUFUS_THEME is used to pass the current theme to the root process
+    # so user-added themes in ~/.config/Lufus/themes are still respected
+    # if the app was able to find them before elevation.
+    env = os.environ.copy()
+    if state.theme:
+        env["LUFUS_THEME"] = state.theme
+
+    # Preserve DISPLAY and XAUTHORITY for GUI apps under pkexec/sudo
+    for var in ["DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "WAYLAND_DISPLAY"]:
+        if var in os.environ:
+            env[var] = os.environ[var]
+
+    cmd = ["pkexec", sys.executable] + sys.argv
+    try:
+        subprocess.run(cmd, env=env, check=True)
+        sys.exit(0)
+    except subprocess.CalledProcessError:
+        # User likely cancelled or pkexec failed
+        pass
+    except Exception as e:
+        print(f"Elevation failed: {e}")
+
+
 def require_root() -> bool:
     """Check if running as root. Returns True if root, False otherwise (with log warning)."""
     if os.geteuid() == 0:

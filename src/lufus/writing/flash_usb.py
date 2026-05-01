@@ -4,8 +4,8 @@ import shlex
 import subprocess
 from lufus.utils import strip_partition_suffix
 from lufus.writing.check_file_sig import check_iso_signature
-from lufus.writing.windows.detect import is_windows_iso
-from lufus.writing.windows.flash import flash_windows
+from lufus.writing.windows.detect import is_windows_iso, is_linux_iso
+from lufus.writing.windows.flash import flash_iso
 from lufus.lufus_logging import get_logger
 from lufus.writing.partition_scheme import PartitionScheme
 
@@ -53,17 +53,21 @@ def flash_usb(
             _status(f"Not an ISO file ({os.path.basename(iso_path)}), skipping ISO signature check")
 
         _status("Checking if image contains installation markers...")
-        if is_windows_iso(iso_path):
-            _status("OS Installation media detected, routing to flash_windows (ISO mode)")
-            return flash_windows(
+        if scheme == PartitionScheme.LINUX:
+            _status("Partition scheme is LINUX, using DD mode for flashing")
+            if is_windows_iso(iso_path):
+                _status("WARNING: Partitioning a Windows ISO with DD may result in an unbootable drive.")
+            elif is_linux_iso(iso_path):
+                _status("Linux Installation media detected, using DD mode.")
+        else:
+            _status(f"Partition scheme is {scheme.name}, using ISO mode (file extraction)")
+            return flash_iso(
                 device,
                 iso_path,
                 scheme,
                 progress_cb=progress_cb,
                 status_cb=status_cb,
             )
-        else:
-            _status("Not a Windows ISO, will use dd for flashing")
 
         dd_args = [
             "dd",

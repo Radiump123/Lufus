@@ -288,22 +288,22 @@ def _copy_efi_boot_files(iso_mount, mount_efi, _status):
     _fix_efi_bootloader(mount_efi)
 
 
-def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=None, status_cb=None) -> bool:
-    """Flash a Windows ISO to a USB device.
+def flash_iso(device: str, iso: str, scheme: PartitionScheme, progress_cb=None, status_cb=None) -> bool:
+    """Flash an ISO to a USB device using file extraction.
+    Supports Windows (with WIM split) and Linux/Other ISOs.
 
     Args:
         device: Block device path (e.g. /dev/sdb).
-        iso: Path to the Windows ISO file.
-        scheme: Partition scheme to use.
+        iso: Path to the ISO file.
+        scheme: Partition scheme to use (FAT32, NTFS, exFAT).
         progress_cb: Optional callback(int) for progress percentage.
         status_cb: Optional callback(str) for status messages.
 
     Returns:
         True on success, False on any failure.
-
-    Raises:
-        ValueError: If device path doesn't match expected patterns.
     """
+    from lufus.writing.windows.detect import is_windows_iso
+
     if not re.match(r"^/dev/(sd[a-z]+|nvme[0-9]+n[0-9]+|mmcblk[0-9]+)$", device):
         raise ValueError(f"Invalid device path: {device}")
 
@@ -316,15 +316,16 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
         if status_cb:
             status_cb(msg)
 
-    _status(f"flash_windows: starting for device={device}, iso={iso}")
+    _status(f"flash_iso: starting for device={device}, iso={iso}, scheme={scheme.name}")
     iso_mount = None
+    windows_mode = is_windows_iso(iso)
 
     try:
         # Step 1: Mount ISO
         _status(f"Mounting ISO {iso}...")
         iso_mount = mount_iso(iso)
         if iso_mount is None:
-            _status("flash_windows: failed to mount ISO")
+            _status("flash_iso: failed to mount ISO")
             return False
         _status(f"ISO mounted at {iso_mount}")
         _emit(8)
@@ -335,32 +336,34 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
         _status(f"Creating partitions on {device} with scheme {scheme.name}...")
         partitions = create_partitions(device, scheme)
         if not partitions:
-            _status("flash_windows: partitioning failed")
+            _status("flash_iso: partitioning failed")
             return False
         efi_part = next((p["path"] for p in partitions if p["role"] == "efi"), None)
         data_part = next((p["path"] for p in partitions if p["role"] == "data"), None)
         if not data_part:
-            _status("flash_windows: no data partition found after partitioning")
+            _status("flash_iso: no data partition found after partitioning")
             return False
         _status(f"Partitions: EFI={efi_part}, data={data_part}")
         run_cmd(["sudo", "udevadm", "settle"])
         _emit(15)
 
         # Step 3: Format partitions
+        label = "WINDOWS" if windows_mode else "LINUX_USB"
         if scheme == PartitionScheme.WINDOWS_NTFS:
             ntfs_cmd = _find_ntfs_tool(status_cb=_status)
             if ntfs_cmd is None:
                 raise FileNotFoundError("mkfs.ntfs / mkntfs not found. Install ntfs-3g.")
-            _status(f"Formatting {data_part} as {scheme.name}...")
-            run_cmd(["sudo", ntfs_cmd, "-f", "-L", "WINDOWS", data_part])
+            _status(f"Formatting {data_part} as NTFS...")
+            run_cmd(["sudo", ntfs_cmd, "-f", "-L", label, data_part])
         elif scheme == PartitionScheme.WINDOWS_EXFAT:
-            _status(f"Formatting {data_part} as {scheme.name}...")
-            run_cmd(["sudo", "mkfs.exfat", "-n", "WINDOWS", data_part])
+            _status(f"Formatting {data_part} as exFAT...")
+            run_cmd(["sudo", "mkfs.exfat", "-n", label, data_part])
         elif scheme == PartitionScheme.SIMPLE_FAT32:
             _status(f"Formatting {data_part} as FAT32...")
-            run_cmd(["sudo", "mkfs.vfat", "-F32", "-n", "WINDOWS", data_part])
+            run_cmd(["sudo", "mkfs.vfat", "-F32", "-n", label, data_part])
 
         if efi_part and scheme in (PartitionScheme.WINDOWS_NTFS, PartitionScheme.WINDOWS_EXFAT):
+            # For NTFS/exFAT boot, we need the uefi-ntfs bootloader on the EFI partition
             uefi_ntfs_img = find_uefi_ntfs_img(status_cb=_status)
             run_cmd(["sudo", "dd", f"if={uefi_ntfs_img}", f"of={efi_part}", "bs=1M", "status=none"])
         _emit(22)
@@ -392,8 +395,11 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
                         f"only {data_free / 1024**3:.2f} GiB free."
                     )
 
-                wim_size = _get_wim_size(iso_mount)
-                needs_split = scheme == PartitionScheme.SIMPLE_FAT32 and wim_size > 4 * 1024**3
+                wim_size = 0
+                if windows_mode:
+                    wim_size = _get_wim_size(iso_mount)
+
+                needs_split = windows_mode and scheme == PartitionScheme.SIMPLE_FAT32 and wim_size > 4 * 1024**3
 
                 if needs_split:
                     _status(f"install.wim is {wim_size / 1024**3:.2f} GiB — exceeds FAT32 limit, will split")
@@ -401,10 +407,8 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
                 else:
                     _copy_direct(iso_mount, mount_data, extract_used, _status, _emit)
 
-                _status(f"install.wim/esd on data partition: {wim_size / 1024**3:.2f} GiB")
-
-                # Step 6: Copy EFI boot files
-                if efi_part and scheme == PartitionScheme.SIMPLE_FAT32:
+                # Step 6: Copy EFI boot files (Windows specific fix)
+                if windows_mode and efi_part and scheme == PartitionScheme.SIMPLE_FAT32:
                     _copy_efi_boot_files(iso_mount, mount_efi, _status)
                 _emit(88)
 
@@ -415,8 +419,8 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
                 _status("Sync complete")
 
             except Exception as e:
-                log.error("flash_windows: ERROR - %s: %s", type(e).__name__, e)
-                _status(f"flash_windows: ERROR - {type(e).__name__}: {e}")
+                log.error("flash_iso: ERROR - %s: %s", type(e).__name__, e)
+                _status(f"flash_iso: ERROR - {type(e).__name__}: {e}")
                 raise
             finally:
                 _status("Unmounting target partitions...")
@@ -426,13 +430,13 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
                 subprocess.run(["sudo", "umount", mount_data], capture_output=True)
                 _status("Unmount complete")
 
-        _status("flash_windows: finished successfully, Windows USB is ready")
+        _status("flash_iso: finished successfully")
         _emit(100)
         return True
 
     except (OSError, subprocess.CalledProcessError) as e:
-        log.error("flash_windows: failed: %s", e)
-        _status(f"flash_windows: failed: {e}")
+        log.error("flash_iso: failed: %s", e)
+        _status(f"flash_iso: failed: {e}")
         return False
     finally:
         if iso_mount and os.path.ismount(iso_mount):
