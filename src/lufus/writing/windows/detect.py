@@ -88,6 +88,7 @@ def is_windows_iso(iso_path: str) -> bool:
     except Exception as e:
         log.error("Windows detection: blkid error: %s: %s", type(e).__name__, e)
 
+
 def is_linux_iso(iso_path: str) -> bool:
     """Detect if an ISO is a Linux distribution by looking for bootloader and kernel markers."""
     log.info("Linux detection: checking %s", iso_path)
@@ -104,7 +105,7 @@ def is_linux_iso(iso_path: str) -> bool:
                 "efi/boot/",
                 "arch/",
                 "casper/",  # Ubuntu/Debian live
-                "live/",    # Debian/Arch live
+                "live/",  # Debian/Arch live
                 "vmlinuz",
                 "initrd",
             ]

@@ -130,7 +130,7 @@ class FlashWorker(QThread):
                     "UDF": PartitionScheme.LINUX,  # Generic catch-all for now
                 }
                 scheme = scheme_map.get(fs_text, PartitionScheme.LINUX)
-                
+
                 success = flash_usb(
                     device_node,
                     iso_path,

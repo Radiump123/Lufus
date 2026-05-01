@@ -17,13 +17,13 @@ def elevate_privileges() -> None:
 
     # Preserve DISPLAY and XAUTHORITY for GUI apps under pkexec/sudo
     env_vars = ["DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "WAYLAND_DISPLAY", "PYTHONPATH", "LUFUS_THEME"]
-    
+
     cmd = ["pkexec", "env"]
     for var in env_vars:
         val = os.environ.get(var) or env.get(var)
         if val:
             cmd.append(f"{var}={val}")
-    
+
     cmd += [sys.executable] + sys.argv
     try:
         subprocess.run(cmd, check=True)
