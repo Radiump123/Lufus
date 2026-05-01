@@ -1,0 +1,48 @@
+name: Python Compatibility
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: "Test — Python ${{ matrix.python-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14-dev"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install psutil pytest packaging platformdirs
+
+      - name: Install package (no-deps to avoid GUI reqs)
+        run: pip install -e . --no-deps
+
+      - name: Run tests
+        run: |
+          pytest --maxfail=1 -q \
+            --ignore=src/lufus/gui \
+            --ignore=src/lufus/drives/autodetect_usb.py \
+            tests/
