@@ -4,7 +4,7 @@ log_window_title,Journal de lufus
 about_window_title,À propos
 settings_window_title,Paramètres
 btn_copy_log,Copier dans le presse-papier
-btn_save_log,Enregistrer le journal...
+btn_save_log,Enregistrer...
 dlg_save_log_title,Enregistrer le journal
 save_failed_title,Échec de l'enregistrement
 save_failed_body,Impossible d'enregistrer le journal :
@@ -24,7 +24,7 @@ lbl_flash_option,Option de flash
 lbl_cluster_size,Taille d'unité d'allocation
 combo_image_windows,Installation standard de Windows
 combo_image_linux,Installation standard de Linux
-combo_image_other,Toute installation (mode DD)
+combo_image_other,N'importe-quelle installation (mode DD)
 combo_image_format,Mode formatage uniquement
 combo_partition_gpt,GPT
 combo_partition_mbr,MBR
@@ -88,14 +88,14 @@ msgbox_scan_error_body,Échec de la recherche de périphériques USB :
 no_usb_found,Aucun périphérique USB trouvé
 dlg_select_image_title,Sélectionner l'image disque
 dlg_select_image_filter,"Images disque (*.iso *.dmg *.img *.bin *.raw);;Tous les fichiers (*)"
-about_content,"Lufus est un programme d'écriture d'images disque écrit en Python pour Linux.
-Inspiré par l'outil original Rufus pour Windows.
+about_content,"Lufus est un logiciel libre d'écriture d'images disque écrit en Python pour GNU/Linux, 
+inspiré par l'outil original Rufus, disponible uniquement pour Windows.
 Version : v1.0.0b1
-GitHub : github.com/hog185/lufus"
-about_subtitle,Outil de flash USB
+GitHub : https://github.com/Hog185/Lufus/"
+about_subtitle,Outil d'écriture USB
 btn_close,Fermer
 btn_ok,OK
-combo_boot_default,média_d_installation.iso
+combo_boot_default,media_d_installation.iso
 tooltip_website,Site web
 settings_label_theme,Thème
 input_hash_placeholder,Saisissez le hachage SHA256 attendu ici...
