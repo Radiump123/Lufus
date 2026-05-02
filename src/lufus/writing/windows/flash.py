@@ -169,12 +169,13 @@ def _find_ntfs_tool(status_cb=None) -> str | None:
     for pm_cmd in pkg_managers:
         if subprocess.run(["which", pm_cmd[0]], capture_output=True).returncode == 0:
             run_cmd(["sudo"] + pm_cmd)
-            break
+            break  # stop after the first working package manager
 
+    # Re-check after installation attempt
     for candidate in ["mkfs.ntfs", "mkntfs"]:
         if subprocess.run(["which", candidate], capture_output=True).returncode == 0:
-            run_cmd(["sudo"] + pm_cmd)
-            break
+            return candidate  # installation succeeded
+
     return None
 
 
@@ -539,24 +540,69 @@ def _get_disk_size_sectors(drive: str) -> int:
 
 UEFI_NTFS_URL = "https://github.com/pbatard/rufus/raw/master/res/uefi/uefi-ntfs.img"
 
+# Pin the expected SHA-256 of the bundled uefi-ntfs.img.
+# UPDATE THIS HASH whenever you update the bundled/downloaded image.
+# Obtain it with: sha256sum uefi-ntfs.img
+# An empty string disables verification and logs a security warning (dev only).
+_UEFI_NTFS_SHA256 = ""
+
+
+def _verify_sha256(path: str, expected: str) -> bool:
+    """Return True if the SHA-256 of *path* matches *expected* (hex, case-insensitive)."""
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest().lower() == expected.strip().lower()
+
 
 def find_uefi_ntfs_img(status_cb=None) -> str:
-    """Find uefi-ntfs.img next to this script, or download it if missing."""
+    """Find uefi-ntfs.img next to this script, or download it if missing.
+
+    Prefer shipping uefi-ntfs.img as part of the package so the download
+    path is never taken in production.  When a download does occur, the
+    file is verified against _UEFI_NTFS_SHA256 before use.
+    """
     candidate = os.path.join(os.path.dirname(__file__), "uefi-ntfs.img")
     if os.path.exists(candidate):
+        # Verify the bundled copy too — catches accidental corruption.
+        if _UEFI_NTFS_SHA256:
+            if not _verify_sha256(candidate, _UEFI_NTFS_SHA256):
+                raise FileNotFoundError(
+                    f"uefi-ntfs.img failed SHA-256 verification. "
+                    f"Re-bundle the file and update _UEFI_NTFS_SHA256."
+                )
         return candidate
 
     if status_cb:
         status_cb(f"uefi-ntfs.img not found, downloading from {UEFI_NTFS_URL}...")
 
+    if not _UEFI_NTFS_SHA256:
+        log.warning(
+            "Downloading uefi-ntfs.img without a pinned hash — "
+            "set _UEFI_NTFS_SHA256 before shipping to production."
+        )
+
     try:
         import urllib.request
-
         urllib.request.urlretrieve(UEFI_NTFS_URL, candidate)
         if status_cb:
             status_cb(f"Downloaded uefi-ntfs.img to {candidate}")
+
+        if _UEFI_NTFS_SHA256:
+            if not _verify_sha256(candidate, _UEFI_NTFS_SHA256):
+                os.unlink(candidate)
+                raise FileNotFoundError(
+                    f"Downloaded uefi-ntfs.img failed SHA-256 verification — "
+                    f"file deleted. Check {UEFI_NTFS_URL} or update _UEFI_NTFS_SHA256."
+                )
         return candidate
+    except FileNotFoundError:
+        raise
     except Exception as e:
+        if os.path.exists(candidate):
+            os.unlink(candidate)
         raise FileNotFoundError(
             f"uefi-ntfs.img not found and download failed: {e}\n"
             f"Download manually from {UEFI_NTFS_URL} and place it next to this script."

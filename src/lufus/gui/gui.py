@@ -903,7 +903,7 @@ class LufusWindow(QMainWindow):
 
     def _open_url(self):
         # open github url in browser :D
-        url = "http://www.github.com/hog185/lufus"
+        url = "https://github.com/Hog185/Lufus"
         pkexec_uid = os.environ.get("PKEXEC_UID")
         if pkexec_uid and os.geteuid() == 0:
             # when running as root via pkexec open as original user :3
@@ -1673,12 +1673,20 @@ class LufusWindow(QMainWindow):
             req = urllib.request.urlopen(url, timeout=5)
             if req.status == 200:
                 data = json.loads(req.read().decode())
-                if version.parse(data["tag_name"]) > version.parse(current_version):
-                    self.log_message(f"New version found: {data['tag_name']} > {current_version}", level="DEBUG")
-                    pass
+                tag_name = data.get("tag_name", "")
+                if not tag_name:
+                    self.log_message("Update check: missing tag_name in API response", level="WARNING")
+                    return
+                try:
+                    is_newer = version.parse(tag_name) > version.parse(current_version)
+                except Exception:
+                    self.log_message(f"Update check: could not parse version tag {tag_name!r}", level="WARNING")
+                    return
+                if is_newer:
+                    self.log_message(f"New version found: {tag_name} > {current_version}", level="DEBUG")
                 else:
                     self.log_message(
-                        f"Running latest release build: {data['tag_name']} <= {current_version}", level="INFO"
+                        f"Running latest release build: {tag_name} <= {current_version}", level="INFO"
                     )
                     return
             else:
@@ -1689,8 +1697,8 @@ class LufusWindow(QMainWindow):
             return
         newupdate = QMessageBox(self)
         newupdate.setWindowTitle("New Update Available!")
-        newupdate.setText(f"A new version ({data['tag_name']}) is available!")
-        newupdate.setInformativeText(f"Would you like to download {data['name']} now?")
+        newupdate.setText(f"A new version ({data.get('tag_name', '?')}) is available!")
+        newupdate.setInformativeText(f"Would you like to download {data.get('name', 'it')} now?")
         download_btn = newupdate.addButton(QMessageBox.StandardButton.Apply)
         download_btn.setText("Download Now")
         later_btn = newupdate.addButton(QMessageBox.StandardButton.Discard)

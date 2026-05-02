@@ -3,7 +3,7 @@ import re
 
 
 def elevate_privileges() -> None:
-    """Relaunch the application with root privileges using pkexec."""
+    # Relaunch the application with root privileges using pkexec. Might try to change it later, but I'll keep that fro now.
     import sys
     import subprocess
     from lufus import state
@@ -14,7 +14,8 @@ def elevate_privileges() -> None:
     env = os.environ.copy()
     if state.theme:
         env["LUFUS_THEME"] = state.theme
-    # Above function needs testing tho. We should make a thing to generate themes in a GUI, like Lufus Themer.
+    # Above function needs testing tho. We should make a thing to generate themes in a GUI, like a Lufus Themer or smth.
+    # Just like GRUB Customizer or whatever it's called.
 
     # Preserve DISPLAY and XAUTHORITY for GUI apps under pkexec/sudo
     env_vars = ["DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "WAYLAND_DISPLAY", "PYTHONPATH", "LUFUS_THEME"]
@@ -30,7 +31,7 @@ def elevate_privileges() -> None:
         subprocess.run(cmd, check=True)
         sys.exit(0)
     except subprocess.CalledProcessError:
-        # User likely cancelled or pkexec failed, don't let user break stuff.
+        # User likely cancelled or pkexec failed
         pass
     except Exception as e:
         print(f"Elevation failed: {e}")

@@ -5,6 +5,8 @@ to bypass hardware requirements, skip privacy questions, and create
 local accounts.
 """
 
+import html
+import re
 import subprocess
 import os
 from lufus.utils import get_mount_and_drive
@@ -12,6 +14,22 @@ from lufus import state
 from lufus.lufus_logging import get_logger
 
 log = get_logger(__name__)
+
+# Windows username restrictions: no \/ [ ] : ; | = , + * ? < > " @
+# Max 20 characters, cannot be all spaces or empty.
+_WIN_USERNAME_RE = re.compile(r'^[^\\\/\[\]:;|=,+*?<>"@\x00-\x1f]{1,20}$')
+
+
+def _validate_windows_username(name: str) -> str | None:
+    """Return a stripped, validated Windows username or None if invalid."""
+    name = name.strip()
+    if not name:
+        log.error("Windows username is empty after stripping.")
+        return None
+    if not _WIN_USERNAME_RE.match(name):
+        log.error("Windows username %r contains forbidden characters or exceeds 20 chars.", name)
+        return None
+    return name
 
 
 def _get_mount_and_drive():
@@ -107,8 +125,12 @@ def win_local_acc_name():
     if not mount:
         log.error("win_local_acc_name: no USB mount found")
         return
-    user_name = state.win_local_acc
-    ## username CANNOT HAVE \/[]:;|=,+*?<> or be empty!!! need to check for that!
+    user_name = _validate_windows_username(state.win_local_acc)
+    if user_name is None:
+        log.error("win_local_acc_name: invalid username %r, aborting", state.win_local_acc)
+        return
+    # html.escape converts < > & " ' so the value is safe to embed in XML.
+    safe_name = html.escape(user_name, quote=True)
     xml_template = f"""<?xml version="1.0" encoding="utf-8"?>
     <unattend xmlns="urn:schemas-microsoft-com:unattend">
         <settings pass="oobeSystem">
@@ -124,9 +146,9 @@ def win_local_acc_name():
                         <LocalAccount wcm:action="add" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
                             <Password><Value></Value><PlainText>true</PlainText></Password>
                             <Description>Primary Local Account</Description>
-                            <DisplayName>{user_name}</DisplayName>
+                            <DisplayName>{safe_name}</DisplayName>
                             <Group>Administrators</Group>
-                            <n>{user_name}</n>
+                            <Name>{safe_name}</Name>
                         </LocalAccount>
                     </LocalAccounts>
                 </UserAccounts>

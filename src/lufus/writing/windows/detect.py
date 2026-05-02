@@ -88,6 +88,9 @@ def is_windows_iso(iso_path: str) -> bool:
     except Exception as e:
         log.error("Windows detection: blkid error: %s: %s", type(e).__name__, e)
 
+    log.info("Windows detection: all checks exhausted — not a Windows ISO")
+    return False
+
 
 def is_linux_iso(iso_path: str) -> bool:
     """Detect if an ISO is a Linux distribution by looking for bootloader and kernel markers."""

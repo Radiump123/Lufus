@@ -14,11 +14,24 @@ log = get_logger(__name__)
 
 # Start a new process group so all children can be killed together
 os.setpgrp()
-pid_file = "/tmp/lufus_helper.pid"
 
-# Write our PID so the GUI can find us
-with open(pid_file, "w") as f:
-    f.write(str(os.getpid()))
+# Write PID to a root-owned directory so unprivileged users cannot create
+# symlinks there before we open the file (TOCTOU prevention).
+# Fall back to a process-specific /tmp name only if /run is unavailable.
+_pid_dir = "/run/lufus"
+try:
+    os.makedirs(_pid_dir, mode=0o700, exist_ok=True)
+    pid_file = os.path.join(_pid_dir, "helper.pid")
+except OSError:
+    # /run not writable (unusual); use a non-guessable name as best-effort
+    pid_file = f"/tmp/lufus_helper_{os.getpid()}.pid"
+
+# O_CREAT | O_TRUNC with mode 0o600 — safe because the directory is 0o700 root-owned
+_fd = os.open(pid_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+try:
+    os.write(_fd, str(os.getpid()).encode())
+finally:
+    os.close(_fd)
 
 _ipc_msg = f"Helper started with PID={os.getpid()}, PGID={os.getpgrp()}"
 print(f"STATUS:{_ipc_msg}")

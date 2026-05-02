@@ -1,5 +1,4 @@
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -61,12 +60,14 @@ def unmount(drive: str = None) -> bool:
     log.info("Unmounting %s...", drive)
     for target in targets:
         try:
-            subprocess.run(["umount", "-l", target])
+            result = subprocess.run(["umount", "-l", target])
+            # exit 32 = "not mounted" on Linux — acceptable when clearing a drive
+            if result.returncode not in (0, 32):
+                log.error("umount -l %s exited with code %d", target, result.returncode)
+                unmount_fail()
+                return False
             time.sleep(0.5)
             log.info("Unmounted %s successfully.", target)
-        except subprocess.CalledProcessError:
-            unmount_fail()
-            return False
         except Exception as e:
             log.error("(UMNTFUNC) Unexpected error type: %s — %s", type(e).__name__, e)
             log_unexpected_error()
@@ -104,8 +105,6 @@ def remount(drive: str = None) -> bool:
 def volume_custom_label(target_partition: str = None) -> bool:
     newlabel = state.new_label
     # Sanitize label: allow only alphanumeric, spaces, hyphens, and underscores
-    import re
-
     newlabel = re.sub(r"[^a-zA-Z0-9 \-_]", "", newlabel).strip()
     if not newlabel:
         newlabel = "USB_DRIVE"
@@ -119,11 +118,8 @@ def volume_custom_label(target_partition: str = None) -> bool:
         log.error("No drive node found. Cannot relabel.")
         return False
 
-    # Sanitize label: strip characters that could be misinterpreted.
-    # Since commands are passed as lists (shell=False), shell injection is not
-    # possible, but we still quote each argument defensively.
-    safe_drive = shlex.quote(drive)
-    safe_label = shlex.quote(newlabel)
+    # Commands are passed as lists (shell=False) so shell injection is not possible.
+    # Label sanitization above ensures the string is safe for all labelling tools.
 
     # 0 -> NTFS, 1 -> FAT32, 2 -> exFAT, 3 -> ext4, 4 -> UDF
     fs_type = state.filesystem_index
@@ -259,7 +255,7 @@ def check_device_bad_blocks() -> bool:
         bad_lines = [line for line in output.splitlines() if line.strip().isdigit()]
         if bad_lines:
             log.warning("%d bad block(s) found on %s!", len(bad_lines), drive)
-            return True
+            return False
         log.info("No bad blocks found on %s.", drive)
         return True
     except FileNotFoundError:

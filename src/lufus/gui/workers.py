@@ -86,10 +86,12 @@ class FlashWorker(QThread):
                 )
             )
             partitions = glob.glob(f"{device_node}*")
+            unmounted_parts = []
             for part in partitions:
                 if part != device_node:  # don't unmount the device itself
                     self.status.emit(self._T.get("status_unmounting", "Unmounting {part}...").format(part=part))
                     fo.unmount(part)
+                    unmounted_parts.append(part)
 
             # perform operation based on image option
             if image_option == 3:  # Format Only
@@ -100,8 +102,9 @@ class FlashWorker(QThread):
                 success = fo.disk_format(status_cb=self.status.emit)
                 if success:
                     self.progress.emit(80)
-                    self.status.emit(self._T.get("status_remounting", "Remounting {part}...").format(part=part))
-                    fo.remount(part)
+                    for part in unmounted_parts:
+                        self.status.emit(self._T.get("status_remounting", "Remounting {part}...").format(part=part))
+                        fo.remount(part)
                     self.progress.emit(100)
                     self.status.emit(self._T.get("status_format_complete", "Format complete!"))
                 else:

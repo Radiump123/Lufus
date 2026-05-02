@@ -33,6 +33,13 @@ def flash_usb(
 
     _status(f"flash_usb called: iso={iso_path}, device={device}")
 
+    # Validate device path before any operation — prevents accidental writes to
+    # system disks if a bad options file or UI bug passes a wrong path.
+    if not re.match(r"^/dev/(sd[a-z]+|nvme[0-9]+n[0-9]+|mmcblk[0-9]+)$", device):
+        log.error("flash_usb: invalid device path %r — aborting", device)
+        _status(f"Flash aborted: invalid device path {device!r}")
+        return False
+
     original_device = device
     device = strip_partition_suffix(device)
     if device != original_device:
