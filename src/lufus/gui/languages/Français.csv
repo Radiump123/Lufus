@@ -3,7 +3,7 @@ window_title,lufus
 log_window_title,Journal de lufus
 about_window_title,À propos
 settings_window_title,Paramètres
-btn_copy_log,Copier dans le presse-papier
+btn_copy_log,Copier
 btn_save_log,Enregistrer...
 dlg_save_log_title,Enregistrer le journal
 save_failed_title,Échec de l'enregistrement
