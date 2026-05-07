@@ -314,8 +314,6 @@ class LufusWindow(QMainWindow):
         self.log_message(f"Startup USB devices passed in: {list((usb_devices or {}).keys()) or 'none'}")
         self.flash_worker = None
         self.log_message(f"UI scale factor: {self._S.f():.3f}  (base 96 DPI)")
-        self._check_latest_download()
-
         # check for new updates function call
         QTimer.singleShot(100, self.get_latest_release)
 

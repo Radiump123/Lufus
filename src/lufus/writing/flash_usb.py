@@ -114,8 +114,22 @@ def flash_usb(
         if progress_cb:
             progress_cb(0)
 
-        for raw in process.stderr:
-            for segment_bytes in re.split(rb"[\r\n]", raw):
+        # dd status=progress writes updates separated by \r (carriage return),
+        # not \n.  Reading line-by-line from process.stderr blocks until a \n
+        # is seen, so progress updates would only arrive at the very end.
+        # read1() returns whatever bytes are currently in the pipe buffer
+        # without waiting for a newline, letting us process \r-terminated
+        # progress lines in real time.
+        buf = b""
+        while True:
+            chunk = process.stderr.read1(65536)
+            if not chunk:
+                break
+            buf += chunk
+            segments = re.split(rb"[\r\n]", buf)
+            # keep the last (possibly incomplete) segment for the next iteration
+            buf = segments[-1]
+            for segment_bytes in segments[:-1]:
                 line_str = segment_bytes.decode("utf-8", errors="replace").strip()
                 if not line_str:
                     continue
