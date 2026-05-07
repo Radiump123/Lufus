@@ -13,7 +13,11 @@ def elevate_privileges() -> None:
     # if the app was able to find them before elevation.
     env = os.environ.copy()
     if state.theme:
-        env["LUFUS_THEME"] = state.theme
+        # Validate theme is a safe filename/path: no path separators, no "..",
+        # and must be a basic filename to prevent path traversal.
+        theme = os.path.basename(state.theme)
+        if theme and theme == state.theme and ".." not in theme:
+            env["LUFUS_THEME"] = theme
 
     # Preserve DISPLAY and XAUTHORITY for GUI apps under pkexec/sudo
     env_vars = ["DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "WAYLAND_DISPLAY", "PYTHONPATH", "LUFUS_THEME"]

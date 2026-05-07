@@ -5,7 +5,6 @@ ls -la
 
 # Install system dependencies
 echo "------------ Installing system libraries ------------"
-apt-get update && apt-get upgrade -y
 INSTALLER="apt-get install -y"
 if [[ -f requirements-system.txt ]]; then
     $INSTALLER $(cat requirements-system.txt) >> appimage-setup.log

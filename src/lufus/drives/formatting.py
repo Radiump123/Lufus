@@ -104,11 +104,16 @@ def unmount(drive: str = None) -> bool:
 def remount(drive: str = None) -> bool:
     if not drive:
         mount, drive, _ = _get_mount_and_drive()
+    else:
+        # Look up mount point for the specified drive
+        from lufus.drives.find_usb import find_usb
+        mount_dict = find_usb()
+        mount = mount_dict.get(drive)
     if not drive:
         log.error("No drive node found. Cannot unmount.")
         return False
-    if not drive or not mount:
-        log.error("No drive node or mount point found. Cannot remount.")
+    if not mount:
+        log.error("No mount point found for drive %s. Cannot remount.", drive)
         return False
     log.info("Remounting %s -> %s...", drive, mount)
     try:

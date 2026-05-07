@@ -124,6 +124,12 @@ def flash_usb(
         while True:
             chunk = process.stderr.read1(65536)
             if not chunk:
+                # Flush any remaining partial stderr fragment so it is not lost
+                if buf:
+                    decoded = buf.decode(errors="replace").rstrip("\r\n")
+                    if decoded:
+                        # Log at info to avoid alarming users with benign dd output
+                        log.info("dd stderr (final fragment): %s", decoded)
                 break
             buf += chunk
             segments = re.split(rb"[\r\n]", buf)
@@ -155,7 +161,7 @@ def flash_usb(
                     # dd bookkeeping lines — informational only, not progress events
                     pass
                 else:
-                    log.warning("dd stderr: %s", line_str)
+                    log.info("dd stderr: %s", line_str)
 
         process.wait()
         _status(f"dd process exited with return code {process.returncode}")

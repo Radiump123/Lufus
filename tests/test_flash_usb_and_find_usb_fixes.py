@@ -385,9 +385,11 @@ class TestFlashUsbProgress:
         progress_values = []
         status_messages = []
 
-        def progress_cb(progress, status):
+        def progress_cb(progress):
             progress_values.append(progress)
-            status_messages.append(status)
+
+        def status_cb(message):
+            status_messages.append(message)
 
         stderr_lines = [
             "0+0 records in\n",
@@ -429,9 +431,9 @@ class TestFlashUsbProgress:
         assert env.get("LC_ALL") == "C"
         assert dict(os.environ) == original_environ
 
-        # progress_cb should have the early 0.0 milestone, then scaled values
-        assert progress_values[0] == 0.0
-        assert progress_values[-1] == 1.0
+        # progress_cb should have the early 0 milestone, then scaled values
+        assert progress_values[0] == 0
+        assert progress_values[-1] == 100
         assert sorted(progress_values) == progress_values
 
         # Status messages should contain the raw dd progress lines
@@ -443,9 +445,11 @@ class TestFlashUsbProgress:
         progress_values = []
         status_messages = []
 
-        def progress_cb(progress, status):
+        def progress_cb(progress):
             progress_values.append(progress)
-            status_messages.append(status)
+
+        def status_cb(message):
+            status_messages.append(message)
 
         stderr_lines = [
             "1+0 records in\n",
@@ -469,18 +473,18 @@ class TestFlashUsbProgress:
             f.write(b"\x00" * 100)
             iso_path = f.name
 
-        with caplog.at_level("WARNING", logger="lufus"):
+        with caplog.at_level("INFO", logger="lufus"):
             try:
-                flash_usb_module.flash_usb("/dev/sdb", iso_path, progress_cb=progress_cb)
+                flash_usb_module.flash_usb("/dev/sdb", iso_path, progress_cb=progress_cb, status_cb=status_cb)
             finally:
                 os.unlink(iso_path)
 
-        # Only the initial 0.0 milestone should be present;
+        # Only the initial 0 milestone should be present;
         # bookkeeping lines must not trigger additional progress_cb calls
-        assert progress_values == [0.0]
+        assert progress_values == [0]
 
-        # Unexpected stderr lines must surface as warnings
+        # Non-progress stderr lines now log at info level
         unexpected_logs = [
             record for record in caplog.records if "some unexpected warning from dd" in record.getMessage()
         ]
-        assert unexpected_logs, "Unexpected stderr lines should produce a warning log entry"
+        assert unexpected_logs, "Unexpected stderr lines should produce an info log entry"
