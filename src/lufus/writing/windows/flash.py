@@ -10,20 +10,10 @@ from typing import TypedDict
 from lufus import state
 from lufus.lufus_logging import get_logger
 from lufus.writing.partition_scheme import PartitionScheme
+from lufus.utils import run_cmd
 
 
 log = get_logger(__name__)
-
-
-class PartitionInfo(TypedDict):
-    role: str
-    path: str
-
-
-def run_cmd(cmd):
-    """Wrapper for subprocess.run with logging and error checking."""
-    log.debug("run: %s", cmd)
-    subprocess.run(cmd, check=True)
 
 
 def _status_print(msg: str):
@@ -155,7 +145,7 @@ def _copy_tree_with_progress(
 def _find_ntfs_tool(status_cb=None) -> str | None:
     """Find mkfs.ntfs/mkntfs, installing ntfs-3g if needed. Returns command name or None."""
     for candidate in ["mkfs.ntfs", "mkntfs"]:
-        if subprocess.run(["which", candidate], capture_output=True).returncode == 0:
+        if shutil.which(candidate):
             return candidate
 
     if status_cb:
@@ -167,13 +157,13 @@ def _find_ntfs_tool(status_cb=None) -> str | None:
         ["zypper", "install", "-y", "ntfs-3g"],
     ]
     for pm_cmd in pkg_managers:
-        if subprocess.run(["which", pm_cmd[0]], capture_output=True).returncode == 0:
+        if shutil.which(pm_cmd[0]):
             run_cmd(["sudo"] + pm_cmd)
             break  # stop after the first working package manager
 
     # Re-check after installation attempt
     for candidate in ["mkfs.ntfs", "mkntfs"]:
-        if subprocess.run(["which", candidate], capture_output=True).returncode == 0:
+        if shutil.which(candidate):
             return candidate  # installation succeeded
 
     return None
@@ -181,7 +171,7 @@ def _find_ntfs_tool(status_cb=None) -> str | None:
 
 def _ensure_wimlib(status_cb=None) -> None:
     """Install wimlib-imagex if not present. Raises FileNotFoundError if it can't be found after install."""
-    if subprocess.run(["which", "wimlib-imagex"], capture_output=True).returncode == 0:
+    if shutil.which("wimlib-imagex"):
         return
     if status_cb:
         status_cb("wimlib-imagex not found, attempting to install...")
@@ -192,10 +182,10 @@ def _ensure_wimlib(status_cb=None) -> None:
         ["zypper", "install", "-y", "wimtools"],
     ]
     for pm_cmd in pkg_managers:
-        if subprocess.run(["which", pm_cmd[0]], capture_output=True).returncode == 0:
+        if shutil.which(pm_cmd[0]):
             run_cmd(["sudo"] + pm_cmd)
             break
-    if subprocess.run(["which", "wimlib-imagex"], capture_output=True).returncode != 0:
+    if not shutil.which("wimlib-imagex"):
         raise FileNotFoundError(
             "wimlib-imagex not found. Install manually: sudo pacman -S wimlib  /  sudo apt install wimtools"
         )
@@ -267,18 +257,24 @@ def _copy_efi_boot_files(iso_mount, mount_efi, _status):
     """Copy EFI boot files from ISO to the EFI partition."""
     _status("Copying EFI boot files to EFI partition...")
 
+    # EFI
     efi_src = _find_path_case_insensitive(iso_mount, "EFI")
     if efi_src:
         efi_items = os.listdir(efi_src)
         _status(f"Found EFI/ with {len(efi_items)} items: {efi_items}")
-        run_cmd(["sudo", "cp", "-r"] + [os.path.join(efi_src, i) for i in efi_items] + [mount_efi])
+        efi_dst = os.path.join(mount_efi, "EFI")
+        run_cmd(["sudo", "mkdir", "-p", efi_dst])
+        run_cmd(["sudo", "cp", "-r"] + [os.path.join(efi_src, i) for i in efi_items] + [efi_dst])
         _status("Copied EFI/ tree to EFI partition")
     else:
         _status("WARNING: No EFI directory found in ISO - drive may not be UEFI bootable")
 
+    # boot
     boot_src = _find_path_case_insensitive(iso_mount, "boot")
     if boot_src:
-        run_cmd(["sudo", "cp", "-r"] + [os.path.join(boot_src, i) for i in os.listdir(boot_src)] + [mount_efi])
+        boot_dst = os.path.join(mount_efi, "boot")
+        run_cmd(["sudo", "mkdir", "-p", boot_dst])
+        run_cmd(["sudo", "cp", "-r"] + [os.path.join(boot_src, i) for i in os.listdir(boot_src)] + [boot_dst])
         _status("Copied boot/ tree to EFI partition")
 
     for fname in ["bootmgr", "bootmgr.efi"]:
@@ -442,7 +438,10 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
             subprocess.run(["sudo", "umount", iso_mount], capture_output=True)
 
 
-# ---new---
+class PartitionInfo(TypedDict):
+    role: str
+    path: str
+
 def mount_iso(iso_path: str) -> str | None:
     """This function mounts an iso file at /mnt/iso/ and returns the location if mount is successfull
 

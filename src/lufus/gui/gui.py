@@ -1476,6 +1476,7 @@ class LufusWindow(QMainWindow):
                     self.log_message(f"Failed to restore terminal: {e}")
 
             # reset ui state :D
+            self.progress_bar.setRange(0, 100)  # exit indeterminate mode
             self.progress_bar.setValue(0)
             self.progress_bar.setFormat("")
             self.btn_start.setEnabled(True)

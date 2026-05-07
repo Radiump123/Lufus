@@ -1,5 +1,15 @@
 import os
 import re
+import subprocess
+from lufus.lufus_logging import get_logger
+
+log = get_logger(__name__)
+
+
+def run_cmd(cmd: list[str]):
+    """Wrapper for subprocess.run with logging and error checking."""
+    log.debug("run: %s", cmd)
+    subprocess.run(cmd, check=True)
 
 
 def elevate_privileges() -> None:

@@ -106,10 +106,14 @@ def remount(drive: str = None) -> bool:
         mount, drive, _ = _get_mount_and_drive()
     else:
         # Look up mount point for the specified drive
-        from lufus.drives.find_usb import find_usb
+        import psutil
 
-        mount_dict = find_usb()
-        mount = mount_dict.get(drive)
+        mount = None
+        for part in psutil.disk_partitions(all=True):
+            if part.device == drive:
+                mount = part.mountpoint
+                break
+
     if not drive:
         log.error("No drive node found. Cannot unmount.")
         return False
