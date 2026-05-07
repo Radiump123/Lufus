@@ -1,9 +1,8 @@
 from __future__ import annotations
+import os as _real_os
 import sys
-import os
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -13,10 +12,59 @@ if str(SRC) not in sys.path:
 from lufus.drives import find_usb as find_usb_module
 
 
+# ---------------------------------------------------------------------------
+# Shared pyudev mock helpers
+# ---------------------------------------------------------------------------
+
+_ORIG_STAT = _real_os.stat
+
+
+def _dev_stat(*args, **kwargs):
+    """Return a fake stat result for /dev/* paths, pass through for everything else."""
+    path = args[0] if args else kwargs.get("path", "")
+    if str(path).startswith("/dev/"):
+        return SimpleNamespace(st_rdev=0x803, st_size=0, st_mtime=0.0, st_mode=0o660)
+    return _ORIG_STAT(*args, **kwargs)
+
+
+def _dev_stat_raising(*args, **kwargs):
+    """Raise PermissionError for /dev/* paths, pass through for everything else."""
+    path = args[0] if args else kwargs.get("path", "")
+    if str(path).startswith("/dev/"):
+        raise PermissionError("no access to device")
+    return _ORIG_STAT(*args, **kwargs)
+
+
+def _patch_pyudev_label(monkeypatch, label):
+    """Patch pyudev so find_usb resolves the given label without real udev."""
+
+    class FakeDevice:
+        def get(self, key, default=None):
+            return label if key == "ID_FS_LABEL" else default
+
+    monkeypatch.setattr(find_usb_module.pyudev, "Context", lambda: SimpleNamespace())
+    monkeypatch.setattr(find_usb_module.os, "stat", _dev_stat)
+    monkeypatch.setattr(
+        find_usb_module.pyudev.Devices,
+        "from_device_number",
+        lambda ctx, kind, rdev: FakeDevice(),
+    )
+
+
+def _patch_pyudev_failing(monkeypatch):
+    """Patch os.stat to fail for device nodes, exercising the label fallback path."""
+    monkeypatch.setattr(find_usb_module.pyudev, "Context", lambda: SimpleNamespace())
+    monkeypatch.setattr(find_usb_module.os, "stat", _dev_stat_raising)
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
 def test_find_usb_returns_mount_to_label_mapping(monkeypatch) -> None:
     user = "testuser"
     mount_path = f"/media/{user}/MY_USB"
-    device_node = "/dev/sdb1"
 
     monkeypatch.setattr(find_usb_module.getpass, "getuser", lambda: user)
     monkeypatch.setattr(
@@ -37,36 +85,17 @@ def test_find_usb_returns_mount_to_label_mapping(monkeypatch) -> None:
     monkeypatch.setattr(
         find_usb_module.psutil,
         "disk_partitions",
-        lambda *args, **kwargs: [SimpleNamespace(mountpoint=mount_path, device=device_node)],
+        lambda *args, **kwargs: [SimpleNamespace(mountpoint=mount_path, device="/dev/sdb1")],
     )
-
-    # Mock os.stat safely
-    os_stat_orig = os.stat
-
-    def mock_os_stat(p):
-        if str(p).startswith("/dev/"):
-            mock_stat = MagicMock()
-            mock_stat.st_rdev = 1234
-            return mock_stat
-        return os_stat_orig(p)
-
-    monkeypatch.setattr(find_usb_module.os, "stat", mock_os_stat)
-
-    # Mock pyudev
-    mock_context = MagicMock()
-    mock_device = MagicMock()
-    mock_device.get.return_value = "lufus_USB"
-    monkeypatch.setattr(find_usb_module.pyudev, "Context", lambda: mock_context)
-    monkeypatch.setattr(find_usb_module.pyudev.Devices, "from_device_number", lambda ctx, type, num: mock_device)
+    _patch_pyudev_label(monkeypatch, "lufus_USB")
 
     result = find_usb_module.find_usb()
     assert result == {mount_path: "lufus_USB"}
 
 
-def test_find_usb_falls_back_to_dir_name_when_pyudev_fails(monkeypatch) -> None:
+def test_find_usb_falls_back_to_dir_name_when_udev_fails(monkeypatch) -> None:
     user = "testuser"
     mount_path = f"/media/{user}/NO_LABEL"
-    device_node = "/dev/sdc1"
 
     monkeypatch.setattr(find_usb_module.getpass, "getuser", lambda: user)
     monkeypatch.setattr(
@@ -87,27 +116,9 @@ def test_find_usb_falls_back_to_dir_name_when_pyudev_fails(monkeypatch) -> None:
     monkeypatch.setattr(
         find_usb_module.psutil,
         "disk_partitions",
-        lambda *args, **kwargs: [SimpleNamespace(mountpoint=mount_path, device=device_node)],
+        lambda *args, **kwargs: [SimpleNamespace(mountpoint=mount_path, device="/dev/sdc1")],
     )
-
-    # Mock os.stat safely
-    os_stat_orig = os.stat
-
-    def mock_os_stat(p):
-        if str(p).startswith("/dev/"):
-            mock_stat = MagicMock()
-            mock_stat.st_rdev = 5678
-            return mock_stat
-        return os_stat_orig(p)
-
-    monkeypatch.setattr(find_usb_module.os, "stat", mock_os_stat)
-
-    # Mock pyudev to fail
-    mock_context = MagicMock()
-    monkeypatch.setattr(find_usb_module.pyudev, "Context", lambda: mock_context)
-    monkeypatch.setattr(
-        find_usb_module.pyudev.Devices, "from_device_number", MagicMock(side_effect=Exception("udev fail"))
-    )
+    _patch_pyudev_failing(monkeypatch)
 
     result = find_usb_module.find_usb()
     assert result == {mount_path: "NO_LABEL"}

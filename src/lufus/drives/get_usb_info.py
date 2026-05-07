@@ -1,6 +1,6 @@
+import pyudev
 import psutil
 import os
-import pyudev
 from typing import TypedDict
 from lufus.lufus_logging import get_logger
 
@@ -26,19 +26,24 @@ def get_usb_info(usb_path: str) -> USBDeviceInfo | None:
             return None
 
         context = pyudev.Context()
-        # Using os.stat to get device number as per requirements
         st = os.stat(device_node)
         device = pyudev.Devices.from_device_number(context, "block", st.st_rdev)
 
         # Size in bytes: udev attributes 'size' is in 512-byte sectors
         size_attr = device.attributes.get("size")
-        usb_size = int(size_attr) * 512 if size_attr else 0
-
-        label = device.get("ID_FS_LABEL")
+        try:
+            usb_size = int(size_attr) * 512 if size_attr is not None else 0
+        except (ValueError, TypeError):
+            log.warning(
+                "Unexpected non-numeric udev size attribute %r; defaulting USB size to 0",
+                size_attr,
+            )
+            usb_size = 0
 
         if usb_size > 32 * 1024**3:
             log.warning("USB device is large (%d bytes); confirm before flashing.", usb_size)
 
+        label = device.get("ID_FS_LABEL")
         if not label:
             label = os.path.basename(usb_path)
 
@@ -49,9 +54,6 @@ def get_usb_info(usb_path: str) -> USBDeviceInfo | None:
         }
         log.info("USB Info: %s", usb_info)
         return usb_info
-    except PermissionError:
-        log.error("Permission denied when trying to get USB info: %s", usb_path)
-        return None
     except Exception as err:
         log.error("Unexpected error getting USB info: %s", err)
         return None

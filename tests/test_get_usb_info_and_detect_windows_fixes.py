@@ -1,5 +1,4 @@
 from __future__ import annotations
-import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,35 +12,35 @@ import lufus.drives.get_usb_info as gui_module
 from lufus.drives.get_usb_info import get_usb_info
 import lufus.writing.windows.detect as dw_module
 from lufus.writing.windows.detect import _label_is_windows, _read_iso_label, is_windows_iso
-from unittest.mock import MagicMock
-import os as real_os
 
 
 def _fake_partitions(mount, device):
     return lambda all=False: [SimpleNamespace(mountpoint=mount, device=device)]
 
 
-def _mock_os_stat_and_pyudev(monkeypatch, size="1000000000", label="MY_USB"):
-    # Mock os.stat safely
-    os_stat_orig = gui_module.os.stat
+def _patch_pyudev(monkeypatch, size_sectors=None, label="MY_USB"):
+    """Patch pyudev so get_usb_info can run without real udev."""
+    from types import SimpleNamespace as SNS
 
-    def mock_os_stat(p):
-        if str(p).startswith("/dev/"):
-            m = MagicMock()
-            m.st_rdev = 1234
-            return m
-        return os_stat_orig(p)
+    class FakeAttributes:
+        def get(self, key, default=None):
+            if key == "size":
+                return str(size_sectors) if size_sectors is not None else None
+            return default
 
-    monkeypatch.setattr(gui_module.os, "stat", mock_os_stat)
+    class FakeDevice:
+        attributes = FakeAttributes()
 
-    # Mock pyudev
-    mock_context = MagicMock()
-    mock_device = MagicMock()
-    # size in 512-byte sectors
-    mock_device.attributes = {"size": str(int(size) // 512)}
-    mock_device.get.return_value = label
-    monkeypatch.setattr(gui_module.pyudev, "Context", lambda: mock_context)
-    monkeypatch.setattr(gui_module.pyudev.Devices, "from_device_number", lambda ctx, type, num: mock_device)
+        def get(self, key, default=None):
+            return label if key == "ID_FS_LABEL" else default
+
+    monkeypatch.setattr(gui_module.pyudev, "Context", lambda: SNS())
+    monkeypatch.setattr(
+        gui_module.pyudev.Devices,
+        "from_device_number",
+        lambda ctx, kind, rdev: FakeDevice(),
+    )
+    monkeypatch.setattr(gui_module.os, "stat", lambda path: SNS(st_rdev=0x803))
 
 
 class Testget_usb_infoNormalisedMountPath:
@@ -52,14 +51,14 @@ class Testget_usb_infoNormalisedMountPath:
 
     def test_trailing_slash_is_stripped(self, monkeypatch):
         monkeypatch.setattr(gui_module.psutil, "disk_partitions", _fake_partitions("/media/u/USB/", "/dev/sdb1"))
-        _mock_os_stat_and_pyudev(monkeypatch)
+        _patch_pyudev(monkeypatch)
         result = get_usb_info("/media/u/USB/")
         assert result["mount_path"] == "/media/u/USB"
 
     def test_normalised_path_matches_normpath(self, monkeypatch, tmp_path):
         mount = str(tmp_path)
         monkeypatch.setattr(gui_module.psutil, "disk_partitions", _fake_partitions(mount, "/dev/sdc1"))
-        _mock_os_stat_and_pyudev(monkeypatch)
+        _patch_pyudev(monkeypatch)
         result = get_usb_info(mount)
         import os
 
@@ -83,6 +82,35 @@ class Testget_usb_infoAllTrue:
         assert calls.get("all") is True
 
 
+class Testget_usb_infoPyudevError:
+    """Any exception from pyudev (permission, device-not-found, etc.) must be
+    caught and return None rather than propagating to the caller.
+    """
+
+    def test_returns_none_when_pyudev_raises(self, monkeypatch):
+        from types import SimpleNamespace as SNS
+
+        monkeypatch.setattr(gui_module.psutil, "disk_partitions", _fake_partitions("/media/u/USB", "/dev/sdb1"))
+        monkeypatch.setattr(gui_module.pyudev, "Context", lambda: SNS())
+        monkeypatch.setattr(gui_module.os, "stat", lambda path: SNS(st_rdev=0x803))
+
+        def raise_error(ctx, kind, rdev):
+            raise RuntimeError("simulated pyudev failure")
+
+        monkeypatch.setattr(gui_module.pyudev.Devices, "from_device_number", raise_error)
+        result = get_usb_info("/media/u/USB")
+        assert result is None
+
+    def test_returns_none_when_os_stat_raises(self, monkeypatch):
+        from types import SimpleNamespace as SNS
+
+        monkeypatch.setattr(gui_module.psutil, "disk_partitions", _fake_partitions("/media/u/USB", "/dev/sdb1"))
+        monkeypatch.setattr(gui_module.pyudev, "Context", lambda: SNS())
+        monkeypatch.setattr(gui_module.os, "stat", lambda path: (_ for _ in ()).throw(PermissionError("no access")))
+        result = get_usb_info("/media/u/USB")
+        assert result is None
+
+
 class Testget_usb_infoForElse:
     """When no partition matches the mount path, get_usb_info must return {}."""
 
@@ -94,7 +122,7 @@ class Testget_usb_infoForElse:
 
 class TestLabelIsWindowsDeadBranch:
     """'or label.startswith("WINDOWS")' was dead code — every "WINDOWS…"
-    string already starts with "WIN".  The redundant check must be gone. Idk why I don't like that, but eh, it works...
+    string already starts with "WIN".  The redundant check must be gone.
     """
 
     def test_windows_prefix_still_detected(self):
