@@ -124,7 +124,7 @@ jobs:
       matrix:
         pkg_type: [deb, rpm]
     steps:
-      - uses: actions/@checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Ruby
         uses: actions/setup-ruby@v1
