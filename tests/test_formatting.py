@@ -352,7 +352,7 @@ def test_get_mount_and_drive_falls_back_to_find_dn(monkeypatch) -> None:
 # unmount / remount
 # ---------------------------------------------------------------------------
 
-def test_unmount_skips_subprocess_when_no_drive(monkeypatch, capsys) -> None:
+def test_unmount_skips_subprocess_when_no_drive(monkeypatch, caplog) -> None:
     monkeypatch.setattr(formatting, "_get_mount_and_drive", lambda: (None, None, {}))
 
     def bad_run(*a, **kw):
@@ -363,7 +363,7 @@ def test_unmount_skips_subprocess_when_no_drive(monkeypatch, capsys) -> None:
     assert "No drive node found" in caplog.text
 
 
-def test_remount_skips_subprocess_when_no_drive(monkeypatch, capsys) -> None:
+def test_remount_skips_subprocess_when_no_drive(monkeypatch, caplog) -> None:
     monkeypatch.setattr(formatting, "_get_mount_and_drive", lambda: (None, None, {}))
 
     def bad_run(*a, **kw):
