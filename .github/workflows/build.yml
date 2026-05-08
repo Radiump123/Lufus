@@ -38,7 +38,7 @@ jobs:
       - name: Build AppImage
         run: |
           chmod +x scripts/build-appimage.sh
-          bash scripts/appimage-setup.sh
+          bash scripts/build-appimage.sh
 
       - name: Verify AppImage
         run: |
