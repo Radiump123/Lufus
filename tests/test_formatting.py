@@ -378,10 +378,14 @@ def test_unmount_issues_umount_command(monkeypatch) -> None:
     mount = "/media/testuser/USB"
     drive = "/dev/sdb1"
     monkeypatch.setattr(formatting, "_get_mount_and_drive", lambda: (mount, drive, {}))
+    monkeypatch.setattr(formatting.glob, "glob", lambda path: [drive])
     calls = []
     monkeypatch.setattr(formatting.subprocess, "run", lambda cmd, *a, **kw: calls.append(cmd))
+    monkeypatch.setattr(formatting.time, "sleep", lambda x: None)
     formatting.unmount()
-    assert calls and calls[0][0] == "umount" and drive in calls[0]
+    assert any("umount" in cmd for cmd in calls), f"umount not found in {calls}"
+    assert any(drive in cmd for cmd in calls)
+    assert calls[-1] == ["udevadm", "settle"]
 
 
 def test_remount_issues_mount_command(monkeypatch) -> None:
