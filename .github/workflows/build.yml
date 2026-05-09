@@ -11,60 +11,69 @@ on:
 jobs:
   # Briefcase for AppImages, deb and rpm (replaces custom script and fpm)
   build:
-    name: Build ${{ matrix.format }}
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.format }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
     permissions:
       contents: write
     strategy:
       fail-fast: false
       matrix:
-        format: [appimage, system]
+        include:
+          # Job 1: AppImage
+          - os: ubuntu-latest
+            format: appimage
+            args: "--no-docker"
+          # Job 2: DEB
+          - os: ubuntu-latest
+            format: system
+            args: ""
+          # Job 3: RPM (Runs inside a Fedora container)
+          - os: ubuntu-latest
+            format: system
+            args: ""
+            container: fedora:40
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Build Dependencies (Ubuntu)
+        if: matrix.container == ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git python3-dev libfuse2 binutils debhelper devscripts
+
+      - name: Install Build Dependencies (Fedora)
+        if: matrix.container != ''
+        run: |
+          dnf install -y python3-pip python3-devel gcc git rpm-build mesa-libGL libxcb
+
       - name: Set up Python
+        if: matrix.container == ''
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
 
       - name: Install Briefcase
         run: |
-          python -m pip install --upgrade pip
-          pip install briefcase
-
-      - name: Install Build Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential git python3-dev \
-            libfuse2 binutils \
-            debhelper devscripts \
-            rpm
+          python3 -m pip install --upgrade pip
+          python3 -m pip install briefcase
 
       - name: Build Package
         run: |
-          briefcase package linux ${{ matrix.format }} --no-docker --no-input
+          briefcase package linux ${{ matrix.format }} ${{ matrix.args }} --no-input
 
-      - name: Generate Checksums
+      - name: Prepare Artifacts
         run: |
-          cd dist
-          for file in *; do
-            if [ -f "$file" ]; then
-              sha256sum "$file" > "$file.sha256"
-            fi
-          done
+          mkdir -p output
+          find dist/ -type f \( -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) -exec cp {} output/ \;
 
-      - name: Create Release
+      - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          files: |
-            dist/*
-          draft: false
-          prerelease: ${{ contains(github.ref, '-beta') }}
-          generate_release_notes: true
+          files: output/*
           append_body: true
+          generate_release_notes: true
   
   # for binary
   build-tarball:
