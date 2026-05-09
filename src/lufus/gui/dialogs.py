@@ -1,6 +1,6 @@
 from pathlib import Path
 from platformdirs import user_config_dir
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QCheckBox,
@@ -15,8 +15,8 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QRegularExpression, QUrl
-from PyQt6.QtGui import QFont, QRegularExpressionValidator, QDesktopServices
+from PySide6.QtCore import Qt, Signal, QRegularExpression, QUrl
+from PySide6.QtGui import QFont, QRegularExpressionValidator, QDesktopServices
 import sys
 
 from lufus import state as states
@@ -153,7 +153,9 @@ class AboutWindow(QDialog):
         self.about_text.setReadOnly(True)
         self.about_text.setObjectName("aboutContent")
         self.about_text.setFrameShape(QFrame.Shape.NoFrame)
-        self.about_text.setStyleSheet(f"font-family: {font_family}; font-size: {tool_pt}pt;")
+        self.about_text.setStyleSheet(
+            f"font-family: {font_family}; font-size: {tool_pt}pt;"
+        )
         layout.addWidget(self.about_text, 1)
         btn_row0 = QHBoxLayout()
         btn_discord = QPushButton(self._T.get("btn_discord", "Join Discord Server"))
@@ -189,8 +191,8 @@ class AboutWindow(QDialog):
 
 class SettingsDialog(QDialog):
     # signals for when settings change :D
-    language_changed = pyqtSignal(str)
-    theme_changed = pyqtSignal(str)
+    language_changed = Signal(str)
+    theme_changed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -220,7 +222,9 @@ class SettingsDialog(QDialog):
             if current_lang in languages:
                 self.combo_language.setCurrentText(current_lang)
         else:
-            self.combo_language.addItem(self._T.get("settings_no_languages", "No languages found"))
+            self.combo_language.addItem(
+                self._T.get("settings_no_languages", "No languages found")
+            )
             self.combo_language.setEnabled(False)
         layout.addWidget(lbl_lang)
         layout.addWidget(self.combo_language)
@@ -294,9 +298,13 @@ class WinTweaks(QDialog):
         self.setWindowTitle("Windows Tweaks (MAY BREAK! USE CAUTION)")
         self.setFixedSize(600, 300)
         self.ask_label = QLabel("Do you want to customize your windows installation?")
-        self.hardware_checkbox = QCheckBox("Remove requirement for 4GB+ RAM, Secure Boot and TPM 2.0")
+        self.hardware_checkbox = QCheckBox(
+            "Remove requirement for 4GB+ RAM, Secure Boot and TPM 2.0"
+        )
         self.hardware_checkbox.stateChanged.connect(self.update_winhardware)
-        self.microsoft_checkbox = QCheckBox("Remove requirement for an online Microsoft Account")
+        self.microsoft_checkbox = QCheckBox(
+            "Remove requirement for an online Microsoft Account"
+        )
         self.microsoft_checkbox.stateChanged.connect(self.update_winmicrosoftacc)
         self.localacc_checkbox = QCheckBox("Create a local account with username:")
         self.localacc_checkbox.stateChanged.connect(self.update_winlocalaccchk)
@@ -308,7 +316,9 @@ class WinTweaks(QDialog):
         self.localacc_checkbox.toggled.connect(self.username_input.setEnabled)
         self.username_input.setEnabled(self.localacc_checkbox.isChecked())
         self.username_input.textChanged.connect(self.sync_username)
-        self.data_checkbox = QCheckBox("Disable data collection (skip privacy questions)")
+        self.data_checkbox = QCheckBox(
+            "Disable data collection (skip privacy questions)"
+        )
         self.data_checkbox.stateChanged.connect(self.update_winprivacy)
         self.applytweaks_btn = QPushButton("Apply")
         self.applytweaks_btn.clicked.connect(self.applywintweaks)
