@@ -13,6 +13,7 @@ class AppState:
     # Format options
     filesystem_index: int = 0  # 0=NTFS, 1=FAT32, 2=exFAT, 3=ext4, 4=UDF
     image_option: int = 0  # 0=Windows, 1=Linux, 2=Other, 3=Format Only, 4=Ventoy
+    currentflash: int = 0
     partition_scheme: int = 0  # 0=GPT, 1=MBR
     target_system: int = 0  # 0=UEFI, 1=BIOS
     cluster_size: int = 0  # 0=4096, 1=8192
