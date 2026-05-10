@@ -8,6 +8,7 @@ version = "1.0.0"  # keep synced with [tool.briefcase] version
 description = "A rufus clone written in Python and designed to work with Linux."
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
     "psutil>=7.2",
@@ -32,7 +33,8 @@ project_name = "Lufus"
 bundle = "com.github.hog185"
 version = "1.0.0"  # keep synced with [project] version
 url = "https://github.com/Hog185/Lufus"
-license.file = "LICENSE"
+license = "MIT"
+license-files = ["LICENSE"]
 author = "Hog185"
 author_email = "example@example.com"
 
@@ -47,6 +49,7 @@ sources = [
 test_sources = [
     "tests",
 ]
+icon = "src/lufus/gui/assets/icons/lufuslogo"
 requires = [
     "psutil>=7.2",
     "pyside6",
@@ -136,13 +139,17 @@ system_runtime_requires = [
 
 [tool.briefcase.app.lufus.linux.appimage]
 manylinux = "manylinux_2_28"
-system_requires = []  # AppImage needs this section present
+system_requires = ["libxcb-cursor0", "libgl1",]  # AppImage needs this section present
 linuxdeploy_plugins = []
 
 [tool.briefcase.app.lufus.linux.flatpak]
 flatpak_runtime = "org.kde.Platform"
 flatpak_runtime_version = "6.9"
 flatpak_sdk = "org.kde.Sdk"
+
+[tool.briefcase.app.lufus.linux.deb]
+
+[tool.briefcase.app.lufus.linux.rpm]
 
 # Unsupported platforms
 
