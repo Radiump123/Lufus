@@ -1,6 +1,5 @@
 pyinstaller
 pyside6
-pyqt6
 psutil
 pyudev
 packaging
