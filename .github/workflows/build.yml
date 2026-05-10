@@ -9,7 +9,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Briefcase for AppImages, deb and rpm (replaces custom script and fpm)
   build:
     name: Build ${{ matrix.format }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -34,7 +33,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # UBUNTU SETUP
       - name: Install Build Dependencies (Ubuntu)
         if: matrix.container == ''
         run: |
@@ -44,7 +42,7 @@ jobs:
           dosfstools ntfs-3g exfatprogs e2fsprogs udftools btrfs-progs xfsprogs \
           libgl1 libqt6dbus6 libqt6gui6 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 \
           libxcb-shape0 libxkbcommon-x11-0
-      # FEDORA SETUP 
+
       - name: Install Build Dependencies (Fedora)
         if: matrix.container != ''
         run: |
@@ -66,57 +64,54 @@ jobs:
         run: |
           briefcase package linux ${{ matrix.format }} ${{ matrix.args }} --no-input
 
-      - name: Prepare Artifacts
-        run: |
-          mkdir -p output
-          find dist/ -type f \( -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) -exec cp {} output/ \;
-
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: linux-packages-${{ matrix.format }}-${{ matrix.os }}
-          path: dist/*
-  
-  # for binary
+          name: linux-packages-${{ matrix.format }}-${{ matrix.container || 'ubuntu' }}
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+
   build-tarball:
-      runs-on: ubuntu-latest
-      permissions:
-        contents: write
-      steps:
-        - uses: actions/checkout@v4
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
 
-        - name: Set up Python
-          uses: actions/setup-python@v5
-          with:
-            python-version: "3.13"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
 
-        - name: Install dependencies
-          run: |
-            pip install pyinstaller PySide6 psutil pyudev requests packaging platformdirs
+      - name: Install dependencies
+        run: |
+          pip install pyinstaller PySide6 psutil pyudev requests packaging platformdirs
 
-        - name: Build with PyInstaller
-          run: |
-            pyinstaller --noconfirm --onefile --windowed \
-            --icon "src/lufus/gui/assets/icons/lufuslogo.ico" \
-            --paths "./src" \
-            --add-data "src/lufus/gui/assets:lufus/gui/assets" \
-            --add-data "src/lufus/gui/languages:lufus/gui/languages" \
-            --add-data "src/lufus/gui/themes:lufus/gui/themes" \
-            --hidden-import "PySide6.QtCore" \
-            --hidden-import "PySide6.QtWidgets" \
-            --hidden-import "PySide6.QtGui" \
-            --collect-binaries PySide6 \
-            --name "Lufus-x86_64-${{ github.ref_name }}" \
-            "src/lufus/__main__.py"
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --noconfirm --onefile --windowed \
+          --icon "src/lufus/gui/assets/icons/lufuslogo.ico" \
+          --paths "./src" \
+          --add-data "src/lufus/gui/assets:lufus/gui/assets" \
+          --add-data "src/lufus/gui/languages:lufus/gui/languages" \
+          --add-data "src/lufus/gui/themes:lufus/gui/themes" \
+          --hidden-import "PySide6.QtCore" \
+          --hidden-import "PySide6.QtWidgets" \
+          --hidden-import "PySide6.QtGui" \
+          --collect-binaries PySide6 \
+          --name "Lufus-x86_64-${{ github.ref_name }}" \
+          "src/lufus/__main__.py"
 
-        - name: Create Tarball and Checksum
-          run: |
-            cd dist
-            tar -cvzf ../Lufus-x86_64-${{ github.ref_name }}.tar.gz Lufus-x86_64-${{ github.ref_name }}
-            cd ..
-            sha256sum Lufus-x86_64-${{ github.ref_name }}.tar.gz > Lufus-x86_64-${{ github.ref_name }}.tar.gz.sha256
+      - name: Create Tarball and Checksum
+        run: |
+          cd dist
+          tar -cvzf ../Lufus-x86_64-${{ github.ref_name }}.tar.gz Lufus-x86_64-${{ github.ref_name }}
+          cd ..
+          sha256sum Lufus-x86_64-${{ github.ref_name }}.tar.gz > Lufus-x86_64-${{ github.ref_name }}.tar.gz.sha256
 
-        - name: Upload Tarball
+      - name: Upload Tarball
         uses: actions/upload-artifact@v4
         with:
           name: lufus-tarball
@@ -126,7 +121,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build, build-tarball] # This waits for both jobs to finish
+    needs: [build, build-tarball]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -141,6 +136,5 @@ jobs:
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-assets/**/*
-          generate_release_notes: true  
-            
+          files: release-assets/*
+          generate_release_notes: true
