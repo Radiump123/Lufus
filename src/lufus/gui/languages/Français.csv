@@ -136,3 +136,7 @@ acc_website,Ouvrir le site web de Lufus
 acc_about,À propos de Lufus
 acc_settings,Ouvrir les paramètres
 acc_log,Ouvrir la fenêtre du journal
+btn_discord,Rejoindre le serveur Discord
+btn_github,Ouvrir le dépôt GitHub
+msgbox_flash_warning_title,ATTENTION : TOUTES LES DONNÉES DU DISQUE SERONT DÉTRUITES !
+msgbox_flash_warning_body,"Pour continuer cette opération, cliquez sur OK. Pour quitter, cliquez sur ANNULER."

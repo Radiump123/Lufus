@@ -136,3 +136,7 @@ acc_website,Lufus ওয়েবসাইট খুলুন
 acc_about,Lufus সম্পর্কে
 acc_settings,সেটিংস খুলুন
 acc_log,লগ উইন্ডো খুলুন
+btn_discord,ডিসকর্ড সার্ভারে যোগ দিন
+btn_github,গিটহাব রিপোজিটরি খুলুন
+msgbox_flash_warning_title,সতর্কতা: ডিভাইসের সমস্ত ডেটা ধ্বংস হয়ে যাবে!
+msgbox_flash_warning_body,"এই অপারেশন চালিয়ে যেতে, ওকে (OK) ক্লিক করুন। প্রস্থান করতে বাতিল (CANCEL) ক্লিক করুন।"

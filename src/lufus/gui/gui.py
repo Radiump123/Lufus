@@ -1486,6 +1486,31 @@ class LufusWindow(QMainWindow):
             self._clear_speed_eta()
 
     def perform_flash(self):
+        # Rufus-style warning before flashing :3
+        device_name = self.combo_device.currentText()
+        warning_title = self._T.get("msgbox_flash_warning_title", "WARNING: ALL DATA ON DEVICE WILL BE DESTROYED!")
+        warning_body = self._T.get(
+            "msgbox_flash_warning_body",
+            "To continue with this operation, click OK. To quit click CANCEL.",
+        )
+
+        reply = QMessageBox.warning(
+            self,
+            warning_title,
+            f"{warning_title}\n({device_name})\n\n{warning_body}",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+
+        if reply == QMessageBox.StandardButton.Cancel:
+            self.log_message("Flash aborted by user at warning prompt", level="WARN")
+            self.btn_start.setEnabled(True)
+            self.btn_cancel.setEnabled(False)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setFormat("")
+            self._clear_speed_eta()
+            return
+
         # perform actual flash operation :D
         options = {
             "iso_path": state.iso_path,

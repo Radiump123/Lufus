@@ -136,3 +136,7 @@ acc_website,Abrir site do Lufus
 acc_about,Sobre o Lufus
 acc_settings,Abrir configurações
 acc_log,Abrir janela de log
+btn_discord,Entrar no servidor do Discord
+btn_github,Abrir repositório no GitHub
+msgbox_flash_warning_title,AVISO: TODOS OS DADOS NO DISPOSITIVO SERÃO DESTRUÍDOS!
+msgbox_flash_warning_body,"Para continuar com esta operação, clique em OK. Para sair, clique em CANCELAR."

@@ -136,3 +136,7 @@ acc_website,Open Lufus website
 acc_about,About Lufus
 acc_settings,Open settings
 acc_log,Open log window
+btn_discord,Join Discord Server
+btn_github,Open GitHub Repo
+msgbox_flash_warning_title,WARNING: ALL DATA ON DEVICE WILL BE DESTROYED!
+msgbox_flash_warning_body,"To continue with this operation, click OK. To quit click CANCEL."

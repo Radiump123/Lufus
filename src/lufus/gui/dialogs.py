@@ -60,6 +60,12 @@ class LogWindow(QDialog):
         btn_row.addWidget(btn_copy)
         btn_row.addWidget(btn_save)
         btn_row.addStretch()
+
+        btn_close = QPushButton(self._T.get("btn_close", "Close"))
+        btn_close.setFixedWidth(self._S.px(100) if self._S else 100)
+        btn_close.clicked.connect(self.hide)
+        btn_row.addWidget(btn_close)
+
         layout.addLayout(btn_row)
 
         self.setLayout(layout)
@@ -105,9 +111,9 @@ class AboutWindow(QDialog):
 
         if self._S:
             # apply scaled size
-            self.resize(self._S.px(480), self._S.px(360))
+            self.resize(self._S.px(480), self._S.px(450))
         else:
-            self.resize(480, 360)
+            self.resize(480, 450)
 
         m = self._S.px(24) if self._S else 24
         layout = QVBoxLayout()

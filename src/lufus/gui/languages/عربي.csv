@@ -136,3 +136,7 @@ acc_website,فتح موقع Lufus
 acc_about,عن Lufus
 acc_settings,فتح الإعدادات
 acc_log,فتح نافذة السجل
+btn_discord,الانضمام إلى خادم Discord
+btn_github,فتح مستودع GitHub
+msgbox_flash_warning_title,تحذير: سيتم تدمير جميع البيانات الموجودة على الجهاز!
+msgbox_flash_warning_body,"للمتابعة في هذه العملية، انقر فوق موافق. للإنهاء، انقر فوق إلغاء الأمر."

@@ -138,3 +138,7 @@ acc_website,Abrir el sitio web de Lufus
 acc_about,Acerca de Lufus
 acc_settings,Abrir configuración
 acc_log,Abrir ventana de registro
+btn_discord,Unirse al servidor de Discord
+btn_github,Abrir repositorio de GitHub
+msgbox_flash_warning_title,¡ADVERTENCIA: TODOS LOS DATOS DEL DISPOSITIVO SERÁN DESTRUIDOS!
+msgbox_flash_warning_body,"Para continuar con esta operación, haga clic en Aceptar. Para salir, haga clic en CANCELAR."

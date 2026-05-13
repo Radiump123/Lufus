@@ -134,3 +134,7 @@ acc_website,Відкрити сайт Lufus
 acc_about,Про Lufus
 acc_settings,Відкрити налаштування
 acc_log,Відкрити вікно журналу
+btn_discord,Приєднатися до сервера Discord
+btn_github,Відкрити репозиторій GitHub
+msgbox_flash_warning_title,УВАГА: ВСІ ДАНІ НА ПРИСТРОЇ БУДУТЬ ЗНИЩЕНІ!
+msgbox_flash_warning_body,"Щоб продовжити операцію, натисніть ОК. Щоб вийти, натисніть СКАСУВАТИ."
