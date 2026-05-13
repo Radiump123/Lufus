@@ -923,7 +923,7 @@ class LufusWindow(QMainWindow):
 
     def _open_url(self):
         # open github url in browser :D
-        url = "https://github.com/Hog185/Lufus"
+        url = "https://github.com/Hogjects/Lufus"
         pkexec_uid = os.environ.get("PKEXEC_UID")
         if pkexec_uid and os.geteuid() == 0:
             # when running as root via pkexec open as original user :3
@@ -1745,7 +1745,7 @@ class LufusWindow(QMainWindow):
             return True
 
     def get_latest_release(self):
-        owner = "Hog185"
+        owner = "Hogjects"
         repo = "Lufus"
         url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
         current_version = state.version
@@ -1801,7 +1801,7 @@ class LufusWindow(QMainWindow):
         newupdate.exec()
         if newupdate.clickedButton() == download_btn:
             self.log_message(f"New update download button clicked", level="DEBUG")
-            webbrowser.open("https://github.com/Hog185/Lufus/releases")
+            webbrowser.open("https://github.com/Hogjects/Lufus/releases")
         else:
             self.log_message(f"download later button clicked", level="DEBUG")
 

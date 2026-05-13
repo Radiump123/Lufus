@@ -163,7 +163,7 @@ class AboutWindow(QDialog):
         layout.addLayout(btn_row0)
 
         btn_row1 = QHBoxLayout()
-        btn_github = QPushButton(self._T.get("btn_github", "Open Github Repo"))
+        btn_github = QPushButton(self._T.get("btn_github", "Open GitHub Repo"))
         btn_github.setFixedWidth(self._S.px(300) if self._S else 90)
         btn_github.clicked.connect(self.github_open)
         btn_row1.addWidget(btn_github, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -183,7 +183,7 @@ class AboutWindow(QDialog):
         QDesktopServices.openUrl(url)
 
     def github_open(self):
-        url = QUrl("https://github.com/Hog185/Lufus")
+        url = QUrl("https://github.com/Hogjects/Lufus")
         QDesktopServices.openUrl(url)
 
 

@@ -7,8 +7,8 @@ name = "lufus"
 version = "1.0.0"  # keep synced with [tool.briefcase] version
 description = "A rufus clone written in Python and designed to work with Linux."
 readme = "README.md"
-license = "MIT"
-license-files = ["LICENSE"]
+license.text = "MIT"
+license.file = "LICENSE"
 requires-python = ">=3.10"
 dependencies = [
     "psutil>=7.2",
@@ -20,9 +20,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Hog185/Lufus"
-Repository = "https://github.com/Hog185/Lufus.git"
-Issues = "https://github.com/Hog185/Lufus/issues"
+Homepage = "https://github.com/Hogjects/Lufus"
+Repository = "https://github.com/Hogjects/Lufus.git"
+Issues = "https://github.com/Hogjects/Lufus/issues"
 Documentation = "https://splayer.4plt.ch/lufus/"
 
 [project.gui-scripts]
@@ -30,12 +30,12 @@ lufus = "lufus.__main__:main"
 
 [tool.briefcase]
 project_name = "Lufus"
-bundle = "com.github.hog185"
+bundle = "com.github.hogjects"
 version = "1.0.0"  # keep synced with [project] version
-url = "https://github.com/Hog185/Lufus"
-license = "MIT"
-license-files = ["LICENSE"]
-author = "Hog185"
+url = "https://github.com/Hogjects/Lufus"
+license.text = "MIT"
+license.file = "LICENSE"
+author = "Hogjects"
 author_email = "example@example.com"
 
 [tool.briefcase.app.lufus]
