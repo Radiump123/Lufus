@@ -1480,11 +1480,11 @@ class LufusWindow(QMainWindow):
         msg.setIcon(QMessageBox.Icon.Warning)
         msg.setWindowTitle(warning_title)
         msg.setText(f"{warning_title}\n({device_name})\n\n{warning_body}")
-        
+
         ok_btn = msg.addButton(self._T.get("btn_ok", "OK"), QMessageBox.ButtonRole.AcceptRole)
         cancel_btn = msg.addButton(self._T.get("btn_cancel", "Cancel"), QMessageBox.ButtonRole.RejectRole)
         msg.setDefaultButton(cancel_btn)
-        
+
         msg.exec()
         reply_btn = msg.clickedButton()
 
