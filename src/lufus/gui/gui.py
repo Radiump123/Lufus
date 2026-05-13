@@ -1494,15 +1494,19 @@ class LufusWindow(QMainWindow):
             "To continue with this operation, click OK. To quit click CANCEL.",
         )
 
-        reply = QMessageBox.warning(
-            self,
-            warning_title,
-            f"{warning_title}\n({device_name})\n\n{warning_body}",
-            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
-        )
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setWindowTitle(warning_title)
+        msg.setText(f"{warning_title}\n({device_name})\n\n{warning_body}")
+        
+        ok_btn = msg.addButton(self._T.get("btn_ok", "OK"), QMessageBox.ButtonRole.AcceptRole)
+        cancel_btn = msg.addButton(self._T.get("btn_cancel", "Cancel"), QMessageBox.ButtonRole.RejectRole)
+        msg.setDefaultButton(cancel_btn)
+        
+        msg.exec()
+        reply_btn = msg.clickedButton()
 
-        if reply == QMessageBox.StandardButton.Cancel:
+        if reply_btn == cancel_btn:
             self.log_message("Flash aborted by user at warning prompt", level="WARN")
             self.btn_start.setEnabled(True)
             self.btn_cancel.setEnabled(False)

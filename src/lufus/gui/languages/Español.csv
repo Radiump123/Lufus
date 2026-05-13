@@ -95,7 +95,7 @@ Inspirado por la herramienta original Rufus para Windows.
 GitHub: https://github.com/Hogjects/Lufus"
 about_subtitle,Herramienta de flash USB
 btn_close,Cerrar
-btn_ok,OK
+btn_ok,Aceptar
 combo_boot_default,medios_de_instalación.iso
 tooltip_website,Sitio web
 settings_label_theme,Tema

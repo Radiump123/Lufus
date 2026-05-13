@@ -159,18 +159,21 @@ class AboutWindow(QDialog):
         self.about_text.setReadOnly(True)
         self.about_text.setObjectName("aboutContent")
         self.about_text.setFrameShape(QFrame.Shape.NoFrame)
-        self.about_text.setStyleSheet(f"font-family: {font_family}; font-size: {tool_pt}pt;")
+        # decrease font size slightly to fit better :3
+        about_pt = tool_pt - 2 if tool_pt > 9 else tool_pt - 1
+        self.about_text.setStyleSheet(f"font-family: {font_family}; font-size: {about_pt}pt;")
         layout.addWidget(self.about_text, 1)
+
         btn_row0 = QHBoxLayout()
         btn_discord = QPushButton(self._T.get("btn_discord", "Join Discord Server"))
-        btn_discord.setFixedWidth(self._S.px(300) if self._S else 90)
+        btn_discord.setMinimumWidth(self._S.px(280) if self._S else 280)
         btn_discord.clicked.connect(self.discord_open)
         btn_row0.addWidget(btn_discord, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addLayout(btn_row0)
 
         btn_row1 = QHBoxLayout()
         btn_github = QPushButton(self._T.get("btn_github", "Open GitHub Repo"))
-        btn_github.setFixedWidth(self._S.px(300) if self._S else 90)
+        btn_github.setMinimumWidth(self._S.px(280) if self._S else 280)
         btn_github.clicked.connect(self.github_open)
         btn_row1.addWidget(btn_github, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addLayout(btn_row1)
@@ -316,9 +319,9 @@ class WinTweaks(QDialog):
         self.username_input.textChanged.connect(self.sync_username)
         self.data_checkbox = QCheckBox("Disable data collection (skip privacy questions)")
         self.data_checkbox.stateChanged.connect(self.update_winprivacy)
-        self.applytweaks_btn = QPushButton("Apply")
+        self.applytweaks_btn = QPushButton(self._T.get("btn_ok", "OK"))
         self.applytweaks_btn.clicked.connect(self.applywintweaks)
-        self.canceltweaks_btn = QPushButton("Cancel")
+        self.canceltweaks_btn = QPushButton(self._T.get("btn_cancel", "Cancel"))
         self.canceltweaks_btn.clicked.connect(self.reject)  # closes window
         layout = QVBoxLayout()
         layout.setSpacing(15)
