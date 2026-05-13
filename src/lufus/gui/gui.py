@@ -66,6 +66,9 @@ _LOG_LEVELS = {
 }
 
 
+from lufus.browse_freely import open_url_non_root
+
+
 class BackgroundWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -924,28 +927,7 @@ class LufusWindow(QMainWindow):
     def _open_url(self):
         # open github url in browser :D
         url = "https://github.com/Hogjects/Lufus"
-        pkexec_uid = os.environ.get("PKEXEC_UID")
-        if pkexec_uid and os.geteuid() == 0:
-            # when running as root via pkexec open as original user :3
-            try:
-                import pwd
-
-                user_info = pwd.getpwuid(int(pkexec_uid))
-                subprocess.Popen(
-                    ["runuser", "-u", user_info.pw_name, "--", "xdg-open", url],
-                    env={
-                        "DISPLAY": os.environ.get("DISPLAY", ":0"),
-                        "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY", ""),
-                        "XDG_RUNTIME_DIR": f"/run/user/{pkexec_uid}",
-                        "HOME": user_info.pw_dir,
-                        "PATH": "/usr/bin:/bin",
-                    },
-                )
-                return
-            except Exception as e:
-                self.log_message(f"Failed to open URL as user: {e}", level="WARN")
-        # fallback to normal browser open :D
-        webbrowser.open(url)
+        open_url_non_root(url)
 
     def update_new_label(self, current_text):
         # update volume label in states :3
@@ -1830,7 +1812,7 @@ class LufusWindow(QMainWindow):
         newupdate.exec()
         if newupdate.clickedButton() == download_btn:
             self.log_message(f"New update download button clicked", level="DEBUG")
-            webbrowser.open("https://github.com/Hogjects/Lufus/releases")
+            open_url_non_root("https://github.com/Hogjects/Lufus/releases")
         else:
             self.log_message(f"download later button clicked", level="DEBUG")
 

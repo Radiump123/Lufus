@@ -25,6 +25,9 @@ from lufus.gui.scale import Scale
 from lufus.lufus_logging import get_logger
 
 
+from lufus.browse_freely import open_url_non_root
+
+
 class LogWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -188,12 +191,12 @@ class AboutWindow(QDialog):
         self.setLayout(layout)
 
     def discord_open(self):
-        url = QUrl("https://discord.gg/4G6FeBwsxb")
-        QDesktopServices.openUrl(url)
+        url = "https://discord.gg/4G6FeBwsxb"
+        open_url_non_root(url)
 
     def github_open(self):
-        url = QUrl("https://github.com/Hogjects/Lufus")
-        QDesktopServices.openUrl(url)
+        url = "https://github.com/Hogjects/Lufus"
+        open_url_non_root(url)
 
 
 class SettingsDialog(QDialog):
