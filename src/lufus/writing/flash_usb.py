@@ -104,7 +104,7 @@ def flash_usb(
         buf = b""
         last_pct = -1
         while True:
-            chunk = process.stderr.readline()
+            chunk = process.stderr.read(4096)
             if not chunk:
                 break
             buf += chunk

@@ -146,7 +146,7 @@ class Testflash_usbNvmeDeviceStrip:
                 pass
 
         class FakePipe:
-            def readline(self):
+            def read(self, n=-1):
                 return b""
 
         monkeypatch.setattr(flash_usb_module.subprocess, "Popen", FakeProcess)

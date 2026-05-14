@@ -1225,6 +1225,12 @@ class LufusWindow(QMainWindow):
         self._T = load_translations(language)
         self._update_ui_text()
         self.log_message(f"Language changed to: {language}")
+        try:
+            _lang_cfg = Path(user_config_dir("Lufus")) / "active_language"
+            _lang_cfg.parent.mkdir(parents=True, exist_ok=True)
+            _lang_cfg.write_text(language, encoding="utf-8")
+        except Exception as e:
+            self.log_message(f"Failed to persist language setting: {e}", level="WARN")
 
     def _update_ui_text(self):
         # update all text labels with new translations :3

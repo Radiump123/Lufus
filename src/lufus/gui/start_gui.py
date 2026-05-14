@@ -23,6 +23,19 @@ def _load_initial_theme():
         pass
 
 
+def _load_initial_language():
+    # Load persisted language preference; fall back to system locale detection
+    try:
+        _lang_cfg = Path(user_config_dir("Lufus")) / "active_language"
+        if _lang_cfg.exists():
+            state.language = _lang_cfg.read_text(encoding="utf-8").strip()
+        else:
+            from lufus.gui.i18n import detect_system_language
+            state.language = detect_system_language()
+    except Exception:
+        pass
+
+
 def _show_root_warning() -> None:
     from PySide6.QtWidgets import QApplication, QMessageBox
     from PySide6.QtCore import QTimer
@@ -62,6 +75,7 @@ def launch_gui_with_usb_data() -> None:
             log.warning("Could not capture user starting directory: %s", e)
 
         _load_initial_theme()
+        _load_initial_language()
         elevation_attempted = True
         elevate_privileges()
 
@@ -69,6 +83,7 @@ def launch_gui_with_usb_data() -> None:
         _show_root_warning()
         sys.exit(1)
 
+    _load_initial_language()
     usb_devices = find_usb()
     log.info("Launching GUI with USB devices: %s", usb_devices)
 
