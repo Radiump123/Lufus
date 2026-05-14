@@ -141,12 +141,17 @@ class Testflash_usbNvmeDeviceStrip:
             def __init__(self, args, **kwargs):
                 popen_calls["args"] = args
                 self.stderr = FakePipe()
+                popen_calls["stderr"] = self.stderr
 
             def wait(self):
                 pass
 
         class FakePipe:
+            def __init__(self):
+                self.last_n = None
+
             def read(self, n=-1):
+                self.last_n = n
                 return b""
 
         monkeypatch.setattr(flash_usb_module.subprocess, "Popen", FakeProcess)
@@ -155,6 +160,9 @@ class Testflash_usbNvmeDeviceStrip:
 
         dd_of = next((a for a in popen_calls["args"] if a.startswith("of=")), None)
         assert dd_of == "of=/dev/nvme0n1", f"Expected of=/dev/nvme0n1, got {dd_of}"
+
+        # Verify that read() was called with the expected chunk size
+        assert popen_calls["stderr"].last_n == 4096, f"Expected read(4096), got read({popen_calls['stderr'].last_n})"
 
 
 # ---------------------------------------------------------------------------

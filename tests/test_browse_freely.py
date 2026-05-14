@@ -68,10 +68,12 @@ class TestBrowseFreely(unittest.TestCase):
             "SUDO_USER": "raphael",
             "DISPLAY": ":0",
         }
-        # Ensure PKEXEC_UID is not in env if it was there
+        # Ensure PKEXEC_UID and XDG_RUNTIME_DIR are not in env to test fallback logic
         with patch.dict(os.environ, env_overrides, clear=False):
             if "PKEXEC_UID" in os.environ:
                 del os.environ["PKEXEC_UID"]
+            if "XDG_RUNTIME_DIR" in os.environ:
+                del os.environ["XDG_RUNTIME_DIR"]
 
             # Mock pwd info
             mock_user = MagicMock()
@@ -80,7 +82,6 @@ class TestBrowseFreely(unittest.TestCase):
             mock_getpwnam.return_value = mock_user
 
             open_url_non_root(self.url)
-
         # Verify subprocess.Popen was called with runuser
         args, kwargs = mock_popen.call_args
         cmd = args[0]
