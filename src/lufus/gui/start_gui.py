@@ -31,6 +31,7 @@ def _load_initial_language():
             state.language = _lang_cfg.read_text(encoding="utf-8").strip()
         else:
             from lufus.gui.i18n import detect_system_language
+
             state.language = detect_system_language()
     except Exception:
         pass

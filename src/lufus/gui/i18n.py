@@ -5,15 +5,24 @@ from pathlib import Path
 from lufus.gui.constants import _find_resource_dir
 
 LOCALE_TO_LANG = {
-    "de_DE": "Deutsch", "de": "Deutsch",
-    "es_ES": "Español", "es": "Español",
-    "fr_FR": "Français", "fr": "Français",
-    "pt_BR": "Português Brasileiro", "pt": "Português Brasileiro",
-    "sv_SE": "Svenska", "sv": "Svenska",
-    "ru_RU": "Русский", "ru": "Русский",
-    "uk_UA": "українська", "uk": "українська",
-    "ar_SA": "عربي", "ar": "عربي",
-    "bn_BD": "বাংলা", "bn": "বাংলা",
+    "de_DE": "Deutsch",
+    "de": "Deutsch",
+    "es_ES": "Español",
+    "es": "Español",
+    "fr_FR": "Français",
+    "fr": "Français",
+    "pt_BR": "Português Brasileiro",
+    "pt": "Português Brasileiro",
+    "sv_SE": "Svenska",
+    "sv": "Svenska",
+    "ru_RU": "Русский",
+    "ru": "Русский",
+    "uk_UA": "українська",
+    "uk": "українська",
+    "ar_SA": "عربي",
+    "ar": "عربي",
+    "bn_BD": "বাংলা",
+    "bn": "বাংলা",
 }
 
 
