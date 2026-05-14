@@ -18,17 +18,23 @@ def open_url_non_root(url: str) -> None:
     if os.geteuid() == 0:
         target_user = None
         target_uid = None
+        home_dir = None
 
-        if pkexec_uid:
-            target_uid = pkexec_uid
-            try:
-                import pwd
+        try:
+            import pwd
 
-                target_user = pwd.getpwuid(int(pkexec_uid)).pw_name
-            except Exception:
-                pass
-        elif sudo_user and sudo_user != "root":
-            target_user = sudo_user
+            if pkexec_uid:
+                pw = pwd.getpwuid(int(pkexec_uid))
+                target_user = pw.pw_name
+                target_uid = pkexec_uid
+                home_dir = pw.pw_dir
+            elif sudo_user and sudo_user != "root":
+                pw = pwd.getpwnam(sudo_user)
+                target_user = sudo_user
+                target_uid = str(pw.pw_uid)
+                home_dir = pw.pw_dir
+        except Exception as e:
+            log.warning(f"Could not resolve target user info: {e}")
 
         if target_user:
             try:
@@ -44,6 +50,8 @@ def open_url_non_root(url: str) -> None:
                     ),
                     "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY", ""),
                     "PATH": "/usr/local/bin:/usr/bin:/bin",
+                    # Ensure HOME is set so GUI apps use the target user's profile and config
+                    "HOME": home_dir or os.environ.get("HOME", ""),
                 }
 
                 # Filter out empty values

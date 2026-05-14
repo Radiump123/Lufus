@@ -26,6 +26,9 @@ def elevate_privileges() -> None:
                 theme_val,
             )
 
+    if state.language:
+        env["LUFUS_LANGUAGE"] = str(state.language)
+
     # Preserve DISPLAY and XAUTHORITY for GUI apps under pkexec/sudo
     # Now also takes the detected XDG_DOWNLOAD_DIR of /src/lufus/user_paths.py to put it into LUFUS_DOWNLOAD_DIR
     env_vars = [
@@ -35,6 +38,7 @@ def elevate_privileges() -> None:
         "WAYLAND_DISPLAY",
         "PYTHONPATH",
         "LUFUS_THEME",
+        "LUFUS_LANGUAGE",
         "LUFUS_DOWNLOAD_DIR",
     ]
 

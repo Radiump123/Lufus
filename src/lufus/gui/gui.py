@@ -119,19 +119,6 @@ class LufusWindow(QMainWindow):
         self.current_language = state.language
         self._T = load_translations(self.current_language)
 
-        # restore theme from env when relaunched as root via pkexec :3
-        env_theme = os.environ.get("LUFUS_THEME", "")
-        if env_theme:
-            state.theme = env_theme
-
-        # load persisted theme from config when not set via env :3
-        if not getattr(state, "theme", ""):
-            try:
-                _theme_cfg = Path(user_config_dir("Lufus")) / "active_theme"
-                state.theme = _theme_cfg.read_text(encoding="utf-8").strip()
-            except Exception:
-                pass
-
         self.setWindowTitle(self._T.get("window_title", "lufus"))
 
         # calculate window size based on screen dimensions
