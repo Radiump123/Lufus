@@ -46,7 +46,7 @@ def _load_initial_language():
 
             state.language = detect_system_language()
     except Exception:
-        pass
+        state.language = "English"
 
 
 def _show_root_warning() -> None:
