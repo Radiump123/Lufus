@@ -1,13 +1,13 @@
 import os
 import re
 import shlex
-import subprocess
 from lufus.utils import strip_partition_suffix
 from lufus.writing.check_file_sig import check_iso_signature
 from lufus.writing.windows.detect import detect_iso_type, IsoType, is_windows_iso
 from lufus.writing.windows.flash import flash_windows
 from lufus.lufus_logging import get_logger
 from lufus.writing.partition_scheme import PartitionScheme
+from lufus.block_ops import write_device_image
 
 log = get_logger(__name__)
 
@@ -79,71 +79,24 @@ def flash_usb(
         else:
             _status("Generic or unknown image, will use dd for flashing")
 
-        dd_args = [
-            "dd",
-            f"if={iso_path}",
-            f"of={device}",
-            "bs=4M",
-            "status=progress",
-            "conv=fsync",
-            "oflag=direct",
-        ]
-
-        _status(f"Spawning dd: {' '.join(dd_args)}")
         _status(f"Writing {iso_size:,} bytes to {shlex.quote(device)}, this may take several minutes...")
 
-        try:
-            process = subprocess.Popen(dd_args, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL)
-        except FileNotFoundError:
-            log.error("Flash failed: 'dd' utility not found. Install coreutils.")
-            _status("Flash failed: 'dd' utility not found. Install coreutils.")
+        ret = write_device_image(
+            iso_path,
+            device,
+            bs=4194304,
+            progress_cb=progress_cb,
+            status_cb=_status,
+        )
+        if ret == 0:
+            _status(f"Write completed successfully: {iso_path} -> {device}")
+            return True
+        else:
+            log.error("Write failed with error code %d", ret)
+            _status(f"Flash failed with error code {ret}")
             return False
-
-        _status(f"dd process started with PID {process.pid}")
-
-        buf = b""
-        last_pct = -1
-        while True:
-            chunk = process.stderr.read(4096)
-            if not chunk:
-                break
-            buf += chunk
-            parts = re.split(rb"[\r\n]", buf)
-            buf = parts[-1]
-            for line in parts[:-1]:
-                line = line.strip()
-                if not line:
-                    continue
-                m = re.match(rb"^(\d+)\s+bytes", line)
-                if m and iso_size > 0:
-                    bytes_done = int(m.group(1))
-                    pct = min(int(bytes_done * 100 / iso_size), 99)
-                    if pct != last_pct:
-                        _status(f"dd progress: {bytes_done:,} / {iso_size:,} bytes ({pct}%)")
-                        last_pct = pct
-                    if progress_cb:
-                        progress_cb(pct)
-                else:
-                    log.warning("dd stderr: %s", line.decode("utf-8", errors="replace"))
-
-        process.wait()
-        _status(f"dd process exited with return code {process.returncode}")
-
-        if process.returncode != 0:
-            raise subprocess.CalledProcessError(process.returncode, dd_args)
-
-        _status(f"dd completed successfully: {iso_path} -> {device}")
-        return True
 
     except OSError as e:
         log.error("Flash failed with OSError: %s", e)
         _status(f"Flash failed with OSError: {e}")
-        return False
-    except subprocess.CalledProcessError as e:
-        log.error(
-            "Flash failed with CalledProcessError: returncode=%d, cmd=%s",
-            e.returncode,
-            e.cmd,
-        )
-        _status(f"Flash failed with CalledProcessError: returncode={e.returncode}, cmd={e.cmd}")
         return False

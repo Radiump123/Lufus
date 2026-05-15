@@ -1,4 +1,3 @@
-import subprocess
 import sys
 import tempfile
 import json
@@ -44,6 +43,7 @@ from PySide6.QtGui import QIcon
 
 from lufus import state
 from lufus import state as states
+from lufus.block_ops import get_device_size
 from lufus.drives.autodetect_usb import UsbMonitor
 from lufus.lufus_logging import get_logger
 from lufus.gui.themes.icon_utils import svg_icon
@@ -67,6 +67,93 @@ _LOG_LEVELS = {
 
 
 from lufus.browse_freely import open_url_non_root
+
+
+def _processes_using_device(device_node: str) -> list[int]:
+    """Return PIDs of processes holding *device_node* open, by scanning /proc."""
+    pids = []
+    device_real = os.path.realpath(device_node) if os.path.exists(device_node) else device_node
+    try:
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            pid = entry
+            fd_dir = f"/proc/{pid}/fd"
+            try:
+                for fd_entry in os.listdir(fd_dir):
+                    try:
+                        link = os.readlink(f"{fd_dir}/{fd_entry}")
+                        if link == device_real or link == device_node:
+                            pids.append(int(pid))
+                            break
+                    except (OSError, ValueError):
+                        pass
+            except PermissionError:
+                continue
+    except Exception:
+        pass
+    return pids
+
+
+def _kill_processes_using_device(device_node: str) -> int:
+    """Kill all processes using *device_node* and return the count killed."""
+    pids = _processes_using_device(device_node)
+    for pid in pids:
+        try:
+            os.kill(pid, 9)  # SIGKILL
+        except OSError:
+            pass
+    return len(pids)
+
+
+def _reset_terminal() -> None:
+    """Reset terminal to sane settings via termios (replaces stty sane)."""
+    import termios
+    import tty
+
+    fd = sys.stdin.fileno()
+    settings = termios.tcgetattr(fd)
+    # Restore defaults: echo on, canonical mode, etc.
+    tty.setraw(fd, when=termios.TCSAFLUSH)
+    termios.tcsetattr(fd, termios.TCSANOW, settings)
+
+
+def _process_name_matches(name_fragment: str) -> bool:
+    """Return True if any running process cmdline contains *name_fragment*."""
+    try:
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                cmdline = Path(f"/proc/{entry}/cmdline").read_bytes()
+                if name_fragment.encode() in cmdline:
+                    return True
+            except (OSError, PermissionError):
+                continue
+    except Exception:
+        pass
+    return False
+
+
+def _get_downloads_dir() -> Path:
+    """Return the user's Downloads directory using XDG config or HOME default.
+
+    Pure Python replacement for ``xdg-user-dir DOWNLOAD``.
+    """
+    try:
+        user_dirs = Path.home() / ".config" / "user-dirs.dirs"
+        if user_dirs.is_file():
+            for line in user_dirs.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line.startswith("XDG_DOWNLOAD_DIR="):
+                    val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    val = val.replace("$HOME", str(Path.home()))
+                    p = Path(val)
+                    if p.is_dir():
+                        return p
+    except Exception:
+        pass
+    return Path.home() / "Downloads"
 
 
 class BackgroundWidget(QWidget):
@@ -191,15 +278,7 @@ class LufusWindow(QMainWindow):
     def _check_latest_download(self):
         if state.iso_path:
             return
-        try:
-            result = subprocess.run(["xdg-user-dir", "DOWNLOAD"], capture_output=True, text=True, timeout=2)
-            downloads = (
-                Path(result.stdout.strip())
-                if result.returncode == 0 and result.stdout.strip()
-                else Path.home() / "Downloads"
-            )
-        except Exception:
-            downloads = Path.home() / "Downloads"
+        downloads = _get_downloads_dir()
         if not downloads.is_dir():
             return
         try:
@@ -1318,11 +1397,11 @@ class LufusWindow(QMainWindow):
 
             try:
                 # check what processes are using device :3
-                lsof = subprocess.run(["lsof", device_node], capture_output=True, text=True)
-                if lsof.returncode == 0:
-                    self.log_message(f"Processes using {device_node} before kill:\n{lsof.stdout}")
+                procs = _processes_using_device(device_node)
+                if procs:
+                    self.log_message(f"Processes using {device_node}: {procs}")
             except Exception as e:
-                self.log_message(f"Could not run lsof: {e}")
+                self.log_message(f"Could not check device usage: {e}")
 
             if self.flash_worker and self.flash_worker.isRunning():
                 # terminate flash worker thread :D
@@ -1335,10 +1414,13 @@ class LufusWindow(QMainWindow):
 
             try:
                 # kill processes using device :3
-                subprocess.run(["fuser", "-k", device_node], timeout=5, check=False)
-                self.log_message("fuser -k executed")
+                killed = _kill_processes_using_device(device_node)
+                if killed:
+                    self.log_message(f"Killed {killed} process(es) using {device_node}")
+                else:
+                    self.log_message("No processes using device found to kill")
             except Exception as e:
-                self.log_message(f"fuser fallback failed: {e}")
+                self.log_message(f"Failed to kill processes: {e}")
 
             if hasattr(self, "verify_worker") and self.verify_worker and self.verify_worker.isRunning():
                 # terminate verify worker :D
@@ -1350,7 +1432,7 @@ class LufusWindow(QMainWindow):
             if self.is_terminal:
                 # reset terminal state :3
                 try:
-                    subprocess.run(["stty", "sane"], timeout=1, check=False)
+                    _reset_terminal()
                     self.log_message("Terminal reset to sane state")
                 except Exception as e:
                     self.log_message(f"Failed to reset terminal: {e}")
@@ -1730,7 +1812,6 @@ class LufusWindow(QMainWindow):
         # check if a polkit authentication agent is running :3
         # returns true if found false otherwise
         try:
-            # common agent process names :D
             agents = [
                 "polkit-gnome-authentication-agent-1",
                 "polkit-kde-authentication-agent-1",
@@ -1738,14 +1819,11 @@ class LufusWindow(QMainWindow):
                 "mate-polkit",
                 "polkit-1-agent",
             ]
-            # use pgrep to search for any of these :3
             for agent in agents:
-                result = subprocess.run(["pgrep", "-f", agent], capture_output=True)
-                if result.returncode == 0:
+                if _process_name_matches(agent):
                     return True
             return False
         except Exception:
-            # if pgrep fails assume agent might be present better to try :D
             return True
 
     def get_latest_release(self):

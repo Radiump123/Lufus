@@ -1,9 +1,9 @@
 import psutil
 import os
-import subprocess
 import getpass
 from lufus import state
 from lufus.lufus_logging import get_logger
+from lufus.block_ops import get_device_label
 
 log = get_logger(__name__)
 
@@ -51,16 +51,7 @@ def find_usb() -> dict[str, str]:
         if not device_node:
             continue
 
-        label = None
-        try:
-            label = subprocess.check_output(
-                ["lsblk", "-d", "-n", "-o", "LABEL", device_node],
-                text=True,
-                timeout=5,
-            ).strip()
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            pass
-
+        label = get_device_label(device_node)
         if not label:
             label = os.path.basename(mount_path)
 

@@ -6,7 +6,6 @@ Tests use monkeypatching so no real hardware, dd, or network is needed.
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -84,34 +83,30 @@ class Testflash_usbOsError:
 
 
 # ---------------------------------------------------------------------------
-# flash_usb — BUG: FileNotFoundError from Popen propagated instead of False
+# flash_usb — BUG: write failure propagated instead of False
 # ---------------------------------------------------------------------------
 
 
-class Testflash_usbDdNotFound:
-    """Before the fix, if dd was absent, Popen raised FileNotFoundError
-    which was not caught — the caller received an exception instead of False.
+class Testflash_usbWriteError:
+    """Before the fix, if dd failed, the error propagated as an exception
+    instead of returning False.
     """
 
-    def test_returns_false_when_dd_not_found(self, tmp_path, monkeypatch):
+    def test_returns_false_when_write_fails(self, tmp_path, monkeypatch):
         iso = tmp_path / "valid.iso"
-        # Write a minimal valid ISO9660 PVD so signature check passes
-        payload = bytearray(32775)
-        payload[32768] = 0x01
-        payload[32769:32774] = b"CD001"
-        payload[32774] = 0x01
-        iso.write_bytes(bytes(payload))
+        iso.write_bytes(b"\x00" * 100)
 
-        # Patch is_windows_iso to avoid 7z subprocess
         monkeypatch.setattr(flash_usb_module, "is_windows_iso", lambda p: False)
-        # Patch check_iso_signature to pass
         monkeypatch.setattr(flash_usb_module, "check_iso_signature", lambda p: True)
+        monkeypatch.setattr(flash_usb_module, "detect_iso_type", lambda p: None)
+        monkeypatch.setattr(flash_usb_module, "flash_windows", lambda *a, **kw: False)
 
-        # Make Popen raise FileNotFoundError (dd absent)
-        def raise_fnf(*args, **kwargs):
-            raise FileNotFoundError("dd not found")
+        import errno
 
-        monkeypatch.setattr(flash_usb_module.subprocess, "Popen", raise_fnf)
+        def fake_write(*args, **kwargs):
+            return -errno.EIO
+
+        monkeypatch.setattr(flash_usb_module, "write_device_image", fake_write)
 
         result = flash_usb("/dev/sdb", str(iso))
         assert result is False
@@ -123,46 +118,31 @@ class Testflash_usbDdNotFound:
 
 
 class Testflash_usbNvmeDeviceStrip:
-    """Ensure flash_usb forwards the correctly stripped NVMe device to dd."""
+    """Ensure flash_usb forwards the correctly stripped NVMe device to write_device_image."""
 
-    def test_nvme_device_stripped_before_dd(self, tmp_path, monkeypatch):
+    def test_nvme_device_stripped_before_write(self, tmp_path, monkeypatch):
         iso = tmp_path / "test.img"
         iso.write_bytes(b"\x00" * 100)
 
         monkeypatch.setattr(flash_usb_module, "check_iso_signature", lambda p: True)
         monkeypatch.setattr(flash_usb_module, "is_windows_iso", lambda p: False)
+        monkeypatch.setattr(flash_usb_module, "detect_iso_type", lambda p: None)
+        monkeypatch.setattr(flash_usb_module, "flash_windows", lambda *a, **kw: False)
 
-        popen_calls = {}
+        write_calls = []
 
-        class FakeProcess:
-            pid = 12345
-            returncode = 0
+        def fake_write(src, dev, bs=4194304, progress_cb=None, status_cb=None):
+            write_calls.append((src, dev))
+            return 0
 
-            def __init__(self, args, **kwargs):
-                popen_calls["args"] = args
-                self.stderr = FakePipe()
-                popen_calls["stderr"] = self.stderr
-
-            def wait(self):
-                pass
-
-        class FakePipe:
-            def __init__(self):
-                self.last_n = None
-
-            def read(self, n=-1):
-                self.last_n = n
-                return b""
-
-        monkeypatch.setattr(flash_usb_module.subprocess, "Popen", FakeProcess)
+        monkeypatch.setattr(flash_usb_module, "write_device_image", fake_write)
 
         flash_usb("/dev/nvme0n1p1", str(iso))
 
-        dd_of = next((a for a in popen_calls["args"] if a.startswith("of=")), None)
-        assert dd_of == "of=/dev/nvme0n1", f"Expected of=/dev/nvme0n1, got {dd_of}"
-
-        # Verify that read() was called with the expected chunk size
-        assert popen_calls["stderr"].last_n == 4096, f"Expected read(4096), got read({popen_calls['stderr'].last_n})"
+        assert len(write_calls) == 1
+        src, dev = write_calls[0]
+        assert dev == "/dev/nvme0n1", f"Expected device /dev/nvme0n1, got {dev}"
+        assert src == str(iso)
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +273,7 @@ class TestFindDNGuardsEmptyDevice:
 
 
 class TestFindUsbHappyPath:
-    def test_find_usb_returns_label_from_lsblk(self, monkeypatch):
+    def test_find_usb_returns_label_from_sysfs(self, monkeypatch):
         user = "testuser"
         mount_path = f"/media/{user}/MY_USB"
 
@@ -319,9 +299,9 @@ class TestFindUsbHappyPath:
             lambda *args, **kwargs: [SimpleNamespace(mountpoint=mount_path, device="/dev/sdb1")],
         )
         monkeypatch.setattr(
-            find_usb_module.subprocess,
-            "check_output",
-            lambda *a, **kw: "MY_LABEL\n",
+            find_usb_module,
+            "get_device_label",
+            lambda dev: "MY_LABEL",
         )
 
         result = find_usb_module.find_usb()
