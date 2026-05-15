@@ -24,6 +24,21 @@ from lufus.block_ops import (
 log = get_logger(__name__)
 
 
+def run_cmd(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess | None:
+    """Run an external command via subprocess.
+
+    Used only for tools that have no pure Python equivalent
+    (mkfs.*, wimlib-imagex, package managers).
+    """
+    try:
+        return subprocess.run(cmd, check=check)
+    except subprocess.CalledProcessError as e:
+        log.error("run_cmd failed: %s — %s", " ".join(cmd), e)
+        if check:
+            raise
+        return None
+
+
 class PartitionInfo(TypedDict):
     role: str
     path: str

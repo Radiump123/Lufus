@@ -475,7 +475,7 @@ def write_device_image(src_path: str, device: str, bs: int = 4194304, progress_c
             os.write(dst_fd, chunk)
             written += len(chunk)
             if total > 0 and progress_cb:
-                pct = min(int(written * 100 / total), 99)
+                pct = int(written * 100 / total)
                 if pct != last_pct:
                     last_pct = pct
                     progress_cb(pct)
@@ -483,6 +483,8 @@ def write_device_image(src_path: str, device: str, bs: int = 4194304, progress_c
                         status_cb(f"Writing: {written:,} / {total:,} bytes ({pct}%)")
 
         os.fsync(dst_fd)
+        if progress_cb:
+            progress_cb(100)
         if status_cb:
             status_cb(f"Write completed: {written:,} bytes written")
         return 0
