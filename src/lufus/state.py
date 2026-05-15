@@ -19,7 +19,8 @@ class AppState:
     cluster_size: int = 0  # 0=4096, 1=8192
     quick_format: int = 0  # 0=quick, 1=full
     create_extended: int = 0
-    check_bad: int = 0  # 0=1 pass, 1=2 passes
+    check_bad: bool = False  # True = run bad block check before flashing
+    bad_blocks_passes: int = 1  # number of passes (1-3)
     new_label: str = "USB_DRIVE"
     flash_mode: int = 0  # 0=ISO, 1=DD
     theme: str = "default"

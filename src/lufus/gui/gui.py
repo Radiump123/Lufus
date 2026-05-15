@@ -1036,7 +1036,8 @@ class LufusWindow(QMainWindow):
 
     def update_check_bad(self):
         # update bad blocks check setting and enable pass selector :3
-        state.check_bad = 0 if self.chk_badblocks.isChecked() else 1
+        state.check_bad = self.chk_badblocks.isChecked()
+        state.bad_blocks_passes = self.combo_badblocks.currentIndex() + 1
         show = self.chk_badblocks.isChecked()
         self.combo_badblocks.setEnabled(show)
         self._animate_widget(self.combo_badblocks, show, "_anim_badblocks")
@@ -1518,6 +1519,7 @@ class LufusWindow(QMainWindow):
         # handle verification result :D
         if success:
             self.log_message("SHA256 verification successful, proceeding to flash")
+            self.progress_bar.setFormat("")
             self._clear_speed_eta()
             if states.image_option == 0 and states.currentflash == 0:
                 dlg = WinTweaks(self)
@@ -1585,6 +1587,7 @@ class LufusWindow(QMainWindow):
             "quick_format": state.quick_format,
             "create_extended": state.create_extended,
             "check_bad": state.check_bad,
+            "bad_blocks_passes": state.bad_blocks_passes,
             "new_label": state.new_label,
             "verify_hash": state.verify_hash,
             "expected_hash": state.expected_hash,

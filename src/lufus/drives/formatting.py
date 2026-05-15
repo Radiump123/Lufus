@@ -192,17 +192,15 @@ def get_format_geometry() -> tuple[int, int, int]:
 #     pass
 
 
-def check_device_bad_blocks() -> bool:
+def check_device_bad_blocks(passes: int = 1) -> bool:
     """Check the device for bad blocks using badblocks.
-    Requires the drive to be unmounted.  The number of passes is determined by
-    state.check_bad (0 = 1 pass read-only, 1 = 2 passes read/write).
+    Requires the drive to be unmounted.  *passes* controls how many
+    passes badblocks runs (1 = read-only, 2+ = non-destructive read-write).
     """
     _, drive, _ = _get_mount_and_drive()
     if not drive:
         log.error("No drive node found. Cannot check for bad blocks.")
         return False
-
-    passes = 2 if state.check_bad else 1
 
     # Probe the device's logical sector size so badblocks uses the real
     # device geometry. Fall back to 4096 bytes if detection fails.
@@ -224,10 +222,10 @@ def check_device_bad_blocks() -> bool:
         )
 
     # -s = show progress, -v = verbose output
-    # -n = non-destructive read-write test (safe default)
+    # -p = number of passes, -n = non-destructive read-write test (for >1 pass)
     args = [_find_tool("badblocks"), "-sv", "-b", str(logical_block_size)]
     if passes > 1:
-        args.append("-n")  # non-destructive read-write
+        args.extend(["-n", "-p", str(passes)])
     args.append(drive)
 
     log.info(

@@ -81,7 +81,7 @@ class TestStatesTypeAnnotations:
             "cluster_size",
             "quick_format",
             "create_extended",
-            "check_bad",
+            "bad_blocks_passes",
             "flash_mode",
         ):
             assert f"{name}: int" in src, f"{name} missing int annotation"
@@ -98,11 +98,14 @@ class TestStatesTypeAnnotations:
 
         src = inspect.getsource(type(state))
         assert "verify_hash: bool" in src
+        assert "check_bad: bool" in src
 
     def test_default_values_correct_types(self):
         assert isinstance(state.filesystem_index, int)
         assert isinstance(state.device_node, str)
         assert isinstance(state.verify_hash, bool)
+        assert isinstance(state.check_bad, bool)
+        assert isinstance(state.bad_blocks_passes, int)
         assert isinstance(state.new_label, str)
 
 
