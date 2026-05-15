@@ -32,11 +32,17 @@ def detect_system_language() -> str:
     Falls back to English if detection fails or no match is found.
     """
     try:
-        # Ensure locale is initialized from the environment, then read current locale.
-        locale.setlocale(locale.LC_CTYPE, "")
-        loc = locale.getlocale()
+        # Read the system locale without mutating global locale state.
+        loc = locale.getdefaultlocale()
     except Exception:
         loc = (None, None)
+
+    # Fallback to the process locale if the default locale could not be determined.
+    if not loc or not loc[0]:
+        try:
+            loc = locale.getlocale()
+        except Exception:
+            loc = (None, None)
 
     lang_code = (loc[0] or "") or os.environ.get("LANG", "")
 
