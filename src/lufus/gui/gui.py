@@ -106,16 +106,42 @@ def _kill_processes_using_device(device_node: str) -> int:
     return len(pids)
 
 
-def _reset_terminal() -> None:
-    """Reset terminal to sane settings via termios (replaces stty sane)."""
-    import termios
-    import tty
+# Sane terminal settings captured at startup (used by _reset_terminal).
+_SANE_TERMIOS: "tuple | None" = None
 
-    fd = sys.stdin.fileno()
-    settings = termios.tcgetattr(fd)
-    # Restore defaults: echo on, canonical mode, etc.
-    tty.setraw(fd, when=termios.TCSAFLUSH)
-    termios.tcsetattr(fd, termios.TCSANOW, settings)
+
+def _capture_sane_termios() -> None:
+    """Capture current terminal settings as the 'sane' baseline."""
+    global _SANE_TERMIOS
+    try:
+        import termios
+        fd = sys.stdin.fileno()
+        if os.isatty(fd):
+            _SANE_TERMIOS = termios.tcgetattr(fd)
+    except Exception:
+        pass
+
+
+def _reset_terminal() -> None:
+    """Reset terminal to sane settings (replaces stty sane).
+
+    No-ops safely when stdin is not a TTY.
+    """
+    import termios
+
+    try:
+        fd = sys.stdin.fileno()
+    except ValueError:
+        return
+    if not os.isatty(fd):
+        return
+    if _SANE_TERMIOS is not None:
+        termios.tcsetattr(fd, termios.TCSANOW, _SANE_TERMIOS)
+    else:
+        # Fallback: explicitly set canonical mode + echo
+        settings = termios.tcgetattr(fd)
+        settings[3] = settings[3] | (termios.ECHO | termios.ICANON)
+        termios.tcsetattr(fd, termios.TCSANOW, settings)
 
 
 def _process_name_matches(name_fragment: str) -> bool:
@@ -193,6 +219,7 @@ class BackgroundWidget(QWidget):
 class LufusWindow(QMainWindow):
     def __init__(self, usb_devices=None, scale: Scale = None):
         super().__init__()
+        _capture_sane_termios()
         # main window initialization :3
         self._logger = get_logger("gui")
 

@@ -31,7 +31,7 @@ def run_cmd(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess |
     (mkfs.*, wimlib-imagex, package managers).
     """
     try:
-        return subprocess.run(cmd, check=check)
+        return subprocess.run(cmd, check=check, shell=False)
     except subprocess.CalledProcessError as e:
         log.error("run_cmd failed: %s — %s", " ".join(cmd), e)
         if check:

@@ -228,7 +228,7 @@ _GPT_PARTITIONS_DEFAULT_COUNT = 128  # standard GPT allows up to 128 entries
 _PART_TYPE_GUID = {
     "data": bytes.fromhex("a2a0d0ebe5b9334487c068b6b72699c7"),  # Microsoft Basic Data
     "efi": bytes.fromhex("28732ac11ff8d211ba4b00a0c93ec93b"),  # EFI System
-    "bios": bytes.fromhex("614886496e6f44746961676f6e6100"),  # BIOS Boot
+    "bios": bytes.fromhex("4861682149646f6e744e656564454649"),  # BIOS Boot
 }
 
 
@@ -324,12 +324,18 @@ def _write_gpt(device: str, disk_guid: bytes, partitions: list[dict]) -> bool:
 
     # Protective MBR
     mbr = b"\x00" * 446
-    mbr += struct.pack("<I", 0x00000200)  # CHS + type (0xEE)
-    mbr += b"\x00" * 3  # ending CHS
+    # Partition entry 1 (16 bytes): GPT protective
+    mbr += struct.pack("<B", 0x00)  # boot indicator
+    mbr += struct.pack("<BBB", 0x00, 0x02, 0x00)  # start CHS
+    mbr += struct.pack("<B", 0xEE)  # partition type: GPT protective
+    mbr += struct.pack("<BBB", 0xFF, 0xFF, 0xFF)  # end CHS (LBA-assist)
     mbr += struct.pack("<I", 1)  # start LBA
     mbr += struct.pack("<I", min(total_lba - 1, 0xFFFFFFFF))  # size LBA
-    mbr += b"\x00" * (510 - len(mbr) - 2)
+    # Three empty partition entries
+    mbr += b"\x00" * 48
     mbr += b"\x55\xaa"
+
+    backup_entries_lba = backup_header_lba - partition_entries_sectors
 
     # Build backup GPT header
     backup_header = (
@@ -343,7 +349,7 @@ def _write_gpt(device: str, disk_guid: bytes, partitions: list[dict]) -> bool:
         + struct.pack("<Q", first_usable)
         + struct.pack("<Q", last_usable)
         + disk_guid
-        + struct.pack("<Q", partition_entries_lba)
+        + struct.pack("<Q", backup_entries_lba)
         + struct.pack("<I", _GPT_PARTITIONS_DEFAULT_COUNT)
         + struct.pack("<I", _GPT_PARTITION_ENTRY_SIZE)
         + struct.pack("<I", partition_entries_crc)
@@ -364,7 +370,7 @@ def _write_gpt(device: str, disk_guid: bytes, partitions: list[dict]) -> bool:
             os.lseek(fd, partition_entries_lba * 512, os.SEEK_SET)
             os.write(fd, entry_data)
             # Write backup partition entries
-            os.lseek(fd, (backup_header_lba - partition_entries_sectors) * 512, os.SEEK_SET)
+            os.lseek(fd, backup_entries_lba * 512, os.SEEK_SET)
             os.write(fd, entry_data)
             # Write backup GPT header (last sector)
             os.lseek(fd, backup_header_lba * 512, os.SEEK_SET)
