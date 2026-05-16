@@ -116,6 +116,10 @@ class FlashWorker(QThread):
                     self._T.get("status_badblocks_passed", "Bad block check passed (no bad blocks found).")
                 )
 
+            # Re-unmount in case auto-mount happened during badblocks check
+            for part in glob.glob(f"{device_node}[0-9]*"):
+                fo.unmount(part)
+
             # perform operation based on image option
             if image_option == 3:  # Format Only
                 self.status.emit(self._T.get("status_format_starting", "Starting format operation..."))

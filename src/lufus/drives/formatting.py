@@ -331,10 +331,29 @@ def disk_format(status_cb=None) -> bool:
         log_unexpected_error()
         return False
 
+    # Wipe filesystem signatures on ALL partitions *before* unmounting.
+    # Raw device writes work even on mounted devices.  Once the signature
+    # is gone, udev won't auto-mount the partition after unmount (it finds
+    # no recognizable filesystem).
+    zeros = b"\x00" * 4096
+    for part in sorted(glob.glob(f"{raw_device}[0-9]*"), reverse=True):
+        try:
+            with os.fdopen(os.open(part, os.O_WRONLY | os.O_CLOEXEC), "wb", buffering=0) as f:
+                for _ in range(512):  # wipe first 2 MiB
+                    f.write(zeros)
+        except OSError:
+            pass  # partition may not exist yet — that's fine
+
+    # Unmount now that signatures are gone — udev won't re-mount.
+    for part in sorted(glob.glob(f"{raw_device}[0-9]*"), reverse=True):
+        umount_lazy(part)
+        time.sleep(0.2)
+
     tool_name, args_fn, fs_label, install_hint = fs_configs[fs_type]
+    tool = _find_tool(tool_name)
+    cmd = [tool] + args_fn()
+
     try:
-        tool = _find_tool(tool_name)
-        cmd = [tool] + args_fn()
         _status(f"Running: {' '.join(cmd)}")
         subprocess.run(cmd, check=True)
         _status(f"Successfully formatted {raw_device} as {fs_label}.")

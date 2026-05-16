@@ -109,14 +109,61 @@ def mount(source: str, target: str, fstype: str | None = None, flags: int = 0, o
     return True
 
 
+def _unescape_mountinfo(s: str) -> str:
+    """Unescape octal escapes (e.g. \\040 for space) in mountinfo paths."""
+    chars = []
+    i = 0
+    while i < len(s):
+        if s[i] == "\\" and i + 3 < len(s):
+            try:
+                chars.append(chr(int(s[i + 1 : i + 4], 8)))
+                i += 4
+                continue
+            except ValueError:
+                pass
+        chars.append(s[i])
+        i += 1
+    return "".join(chars)
+
+
+def _resolve_mount_point(device_or_path: str) -> str | None:
+    """Resolve a block device path (e.g. /dev/sda1) to its mount point
+    directory by reading /proc/self/mountinfo.
+
+    If *device_or_path* is already a directory it is returned unchanged
+    (it may already be a mount point).
+
+    The kernel's umount2(2) accepts a *mount point* path, not a device
+    node path, so callers must resolve device paths to mount points first.
+    """
+    if os.path.isdir(device_or_path):
+        return device_or_path
+    try:
+        st = os.stat(device_or_path)
+    except OSError:
+        return device_or_path
+    dev_id = f"{os.major(st.st_rdev)}:{os.minor(st.st_rdev)}"
+    try:
+        with open("/proc/self/mountinfo") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 10 and parts[2] == dev_id:
+                    return _unescape_mountinfo(parts[4])
+    except OSError:
+        pass
+    return device_or_path
+
+
 def umount(target: str, flags: int = 0) -> bool:
     """Unmount a filesystem via the umount(2) syscall.
 
+    Accepts either a mount point directory or a block device path.
     Returns True on success, False on failure.
     """
+    mount_point = _resolve_mount_point(target)
     libc = _get_libc()
     libc.umount2.restype = ctypes.c_int
-    c_target = ctypes.c_char_p(target.encode())
+    c_target = ctypes.c_char_p(mount_point.encode())
     c_flags = ctypes.c_int(flags)
 
     ret = libc.umount2(c_target, c_flags)
