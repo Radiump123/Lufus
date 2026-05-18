@@ -115,6 +115,7 @@ def _capture_sane_termios() -> None:
     global _SANE_TERMIOS
     try:
         import termios
+
         fd = sys.stdin.fileno()
         if os.isatty(fd):
             _SANE_TERMIOS = termios.tcgetattr(fd)

@@ -60,7 +60,6 @@ def _read_sector(f, lba: int) -> bytes:
     return f.read(_SECTOR_SIZE)
 
 
-
 def _walk_dir(f, lba: int, length: int) -> list[tuple[str, bool, int, int]]:
     """Walk a directory, returning (name, is_dir, extent_lba, data_length) entries."""
     entries = []
