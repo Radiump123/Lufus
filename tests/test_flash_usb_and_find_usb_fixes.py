@@ -100,6 +100,7 @@ class Testflash_usbWriteError:
         monkeypatch.setattr(flash_usb_module, "check_iso_signature", lambda p: True)
         monkeypatch.setattr(flash_usb_module, "detect_iso_type", lambda p: None)
         monkeypatch.setattr(flash_usb_module, "flash_windows", lambda *a, **kw: False)
+        monkeypatch.setattr(flash_usb_module, "get_device_size", lambda dev: 1000)
 
         import errno
 
@@ -128,6 +129,7 @@ class Testflash_usbNvmeDeviceStrip:
         monkeypatch.setattr(flash_usb_module, "is_windows_iso", lambda p: False)
         monkeypatch.setattr(flash_usb_module, "detect_iso_type", lambda p: None)
         monkeypatch.setattr(flash_usb_module, "flash_windows", lambda *a, **kw: False)
+        monkeypatch.setattr(flash_usb_module, "get_device_size", lambda dev: 1000)
 
         write_calls = []
 
@@ -143,6 +145,23 @@ class Testflash_usbNvmeDeviceStrip:
         src, dev = write_calls[0]
         assert dev == "/dev/nvme0n1", f"Expected device /dev/nvme0n1, got {dev}"
         assert src == str(iso)
+
+
+class TestFlashUsbCapacityCheck:
+    """flash_usb must refuse to write an image larger than the target device."""
+
+    def test_returns_false_when_target_too_small(self, tmp_path, monkeypatch):
+        iso = tmp_path / "test.img"
+        iso.write_bytes(b"\x00" * 100)
+
+        monkeypatch.setattr(flash_usb_module, "get_device_size", lambda dev: 99)
+        monkeypatch.setattr(
+            flash_usb_module,
+            "write_device_image",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not write")),
+        )
+
+        assert flash_usb("/dev/sdb", str(iso)) is False
 
 
 # ---------------------------------------------------------------------------

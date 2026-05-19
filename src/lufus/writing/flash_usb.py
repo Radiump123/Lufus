@@ -7,7 +7,7 @@ from lufus.writing.windows.detect import detect_iso_type, IsoType, is_windows_is
 from lufus.writing.windows.flash import flash_windows
 from lufus.lufus_logging import get_logger
 from lufus.writing.partition_scheme import PartitionScheme
-from lufus.block_ops import write_device_image
+from lufus.block_ops import get_device_size, write_device_image
 
 log = get_logger(__name__)
 
@@ -51,6 +51,18 @@ def flash_usb(
     try:
         iso_size = os.path.getsize(iso_path)
         _status(f"File size: {iso_size:,} bytes ({iso_size / (1024**3):.2f} GiB)")
+
+        device_size = get_device_size(device)
+        if device_size is None:
+            _status(f"Flash aborted: could not determine size of {device}")
+            return False
+        _status(f"Target size: {device_size:,} bytes ({device_size / (1024**3):.2f} GiB)")
+        if device_size < iso_size:
+            _status(
+                f"Flash aborted: target is too small "
+                f"({device_size / (1024**3):.2f} GiB available, {iso_size / (1024**3):.2f} GiB image)"
+            )
+            return False
 
         if iso_path.lower().endswith(".iso"):
             _status(f"Validating ISO9660 signature for: {iso_path}")

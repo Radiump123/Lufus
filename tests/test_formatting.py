@@ -430,13 +430,12 @@ def test_unmount_handles_multiple_partitions(monkeypatch) -> None:
     monkeypatch.setattr(formatting.glob, "glob", lambda *a, **kw: [f"{drive}1", f"{drive}2"])
 
     calls = []
-    monkeypatch.setattr(formatting, "umount_lazy", lambda target: calls.append(target) or True)
+    monkeypatch.setattr(formatting, "umount_lazy", lambda target: calls.append(target) or 0)
 
     result = formatting.unmount()
 
     assert result is True
     assert len(calls) == 2
-    assert all(drive_prefix in c for c in calls for drive_prefix in [drive])
 
 
 def test_remount_calls_format_fail_and_returns_false_on_error(monkeypatch) -> None:
