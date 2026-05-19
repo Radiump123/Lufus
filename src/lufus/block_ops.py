@@ -29,6 +29,7 @@ def _get_libc():
     return _LIBC
 
 
+_MS_RDONLY = 1
 _MS_BIND = 4096
 _MS_MOVE = 8192
 _MS_REC = 16384
@@ -216,6 +217,103 @@ def reread_partitions(device: str) -> bool:
         os.close(fd)
 
 
+# -------- Loop device helpers (pure Python replacement for losetup) --------
+
+_LOOP_CTL_GET_FREE = 0x4C82
+_LOOP_SET_FD = 0x4C00
+_LOOP_CLR_FD = 0x4C01
+
+_loop_devices: dict[str, str] = {}  # mount_point -> loop_device
+
+
+def _setup_loop(file_path: str) -> str | None:
+    """Associate a regular file with a free loop device.
+
+    Returns the loop device path (e.g. /dev/loop0) or None on failure.
+    """
+    import fcntl
+
+    try:
+        ctl_fd = os.open("/dev/loop-control", os.O_RDWR | os.O_CLOEXEC)
+        try:
+            idx = fcntl.ioctl(ctl_fd, _LOOP_CTL_GET_FREE)
+        finally:
+            os.close(ctl_fd)
+    except OSError as e:
+        log.error("Cannot get free loop device: %s", e)
+        return None
+
+    loop_dev = f"/dev/loop{idx}"
+    try:
+        file_fd = os.open(file_path, os.O_RDONLY | os.O_CLOEXEC)
+        loop_fd = os.open(loop_dev, os.O_RDWR | os.O_CLOEXEC)
+        try:
+            fcntl.ioctl(loop_fd, _LOOP_SET_FD, file_fd)
+        except OSError as e:
+            log.error("LOOP_SET_FD on %s failed: %s", loop_dev, e)
+            os.close(loop_fd)
+            os.close(file_fd)
+            return None
+        os.close(loop_fd)
+        os.close(file_fd)
+    except OSError as e:
+        log.error("Cannot set up loop for %s: %s", file_path, e)
+        return None
+
+    log.info("Loop device %s <- %s", loop_dev, file_path)
+    return loop_dev
+
+
+def _detach_loop(loop_dev: str) -> None:
+    """Detach a loop device."""
+    import fcntl
+
+    try:
+        fd = os.open(loop_dev, os.O_RDWR | os.O_CLOEXEC)
+        try:
+            fcntl.ioctl(fd, _LOOP_CLR_FD)
+            log.info("Loop device %s detached", loop_dev)
+        except OSError as e:
+            log.warning("Cannot detach loop device %s: %s", loop_dev, e)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
+def mount_iso(iso_path: str, mount_point: str) -> bool:
+    """Mount an ISO file on *mount_point* using a loop device.
+
+    Creates the mount point directory if needed.
+    Returns True on success.
+    """
+    os.makedirs(mount_point, exist_ok=True)
+    loop_dev = _setup_loop(iso_path)
+    if loop_dev is None:
+        return False
+
+    # Windows installer ISOs normally store the real payload in UDF. Their
+    # ISO9660 compatibility view may contain only a small readme.txt.
+    for fstype in ("udf", "iso9660"):
+        if mount(loop_dev, mount_point, fstype=fstype, flags=_MS_RDONLY):
+            _loop_devices[mount_point] = loop_dev
+            log.info("ISO %s mounted as %s on %s", iso_path, fstype, mount_point)
+            return True
+
+    log.error("mount(2) failed for loop device %s on %s as UDF or ISO9660", loop_dev, mount_point)
+    _detach_loop(loop_dev)
+    return False
+
+
+def umount_iso(mount_point: str) -> bool:
+    """Unmount an ISO mounted via mount_iso and detach its loop device."""
+    ok = umount(mount_point)
+    loop_dev = _loop_devices.pop(mount_point, None)
+    if loop_dev:
+        _detach_loop(loop_dev)
+    return ok
+
+
 # -------- GPT partition table writer --------
 
 _GPT_SIGNATURE = b"EFI PART"
@@ -236,6 +334,13 @@ def _crc32(data: bytes) -> int:
     import binascii
 
     return binascii.crc32(data) & 0xFFFFFFFF
+
+
+def _gpt_header_crc(header: bytes, header_size: int = 92) -> int:
+    """Return a GPT header CRC over HeaderSize bytes with the CRC field zeroed."""
+    crc_data = bytearray(header[:header_size])
+    crc_data[16:20] = b"\x00\x00\x00\x00"
+    return _crc32(bytes(crc_data))
 
 
 def _write_gpt(device: str, disk_guid: bytes, partitions: list[dict]) -> bool:
@@ -318,8 +423,9 @@ def _write_gpt(device: str, disk_guid: bytes, partitions: list[dict]) -> bool:
     )
     assert len(header) == 512
 
-    # Compute and set header CRC
-    header_crc = _crc32(header[:16] + b"\x00\x00\x00\x00" + header[20:])
+    # Compute and set header CRC. GPT requires the CRC to cover only
+    # HeaderSize bytes, not the full 512-byte sector.
+    header_crc = _gpt_header_crc(header, 92)
     header = header[:16] + struct.pack("<I", header_crc) + header[20:]
 
     # Protective MBR
@@ -355,7 +461,7 @@ def _write_gpt(device: str, disk_guid: bytes, partitions: list[dict]) -> bool:
         + struct.pack("<I", partition_entries_crc)
         + b"\x00" * (512 - 92)
     )
-    backup_crc = _crc32(backup_header[:16] + b"\x00\x00\x00\x00" + backup_header[20:])
+    backup_crc = _gpt_header_crc(backup_header, 92)
     backup_header = backup_header[:16] + struct.pack("<I", backup_crc) + backup_header[20:]
 
     try:
@@ -375,6 +481,7 @@ def _write_gpt(device: str, disk_guid: bytes, partitions: list[dict]) -> bool:
             # Write backup GPT header (last sector)
             os.lseek(fd, backup_header_lba * 512, os.SEEK_SET)
             os.write(fd, backup_header)
+            os.fsync(fd)
         finally:
             os.close(fd)
         log.info("GPT written to %s (%d partitions)", device, len(partitions))

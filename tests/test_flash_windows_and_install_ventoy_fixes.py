@@ -19,7 +19,9 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import lufus.writing.windows.flash as fw_module
-from lufus.writing.windows.flash import _get_wim_size, _find_path_case_insensitive
+import lufus.writing.windows.tweaks as tweaks_module
+import lufus.block_ops as block_ops_module
+from lufus.writing.windows.flash import _get_wim_size, _find_path_case_insensitive, create_partitions
 import lufus.writing.install_ventoy as iv_module
 from lufus.writing.install_ventoy import download_wimboot, install_grub
 
@@ -223,3 +225,147 @@ class TestInstallGrubMountCleanup:
         assert "finally:" in src, "install_grub must use a finally block for cleanup"
         assert "efi_mounted" in src, "efi_mounted flag must exist to guard conditional unmount"
         assert "data_mounted" in src, "data_mounted flag must exist to guard conditional unmount"
+
+
+class TestWindowsTweaksMountedTarget:
+    """Tweaks must run against the live flash mount, not rediscover USB mounts
+    after flash_windows has already unmounted its temporary target mount.
+    """
+
+    def test_apply_windows_tweaks_uses_explicit_mount(self, tmp_path, monkeypatch):
+        calls = []
+
+        monkeypatch.setattr(tweaks_module.state, "win_hardware_bypass", 1)
+        monkeypatch.setattr(tweaks_module.state, "win_microsoft_acc", 1)
+        monkeypatch.setattr(tweaks_module.state, "win_local_acc_chk", 1)
+        monkeypatch.setattr(tweaks_module.state, "win_privacy", 1)
+        monkeypatch.setattr(
+            tweaks_module,
+            "_get_mount_and_drive",
+            lambda: (_ for _ in ()).throw(AssertionError("must not rediscover mount")),
+        )
+        monkeypatch.setattr(
+            tweaks_module, "win_hardware_bypass", lambda mount=None: calls.append(("hw", mount)) or True
+        )
+        monkeypatch.setattr(
+            tweaks_module, "win_local_acc_name", lambda mount=None: calls.append(("name", mount)) or True
+        )
+        monkeypatch.setattr(
+            tweaks_module,
+            "win_skip_privacy_questions",
+            lambda mount=None: calls.append(("privacy", mount)) or True,
+        )
+
+        assert tweaks_module.apply_windows_tweaks(str(tmp_path)) is True
+        assert calls == [("hw", str(tmp_path)), ("name", str(tmp_path)), ("privacy", str(tmp_path))]
+
+    def test_flash_windows_applies_tweaks_before_unmounting_targets(self):
+        import inspect
+
+        src = inspect.getsource(fw_module.flash_windows)
+        assert "apply_windows_tweaks(mount_data)" in src
+        assert src.index("apply_windows_tweaks(mount_data)") < src.index("Unmounting target partitions")
+
+
+class TestCreatePartitionsWaitsForDeviceNodes:
+    """Formatting must not start until the kernel has exposed /dev/sdX1."""
+
+    def test_waits_until_partition_node_exists(self, monkeypatch):
+        exists_calls = []
+        reread_calls = []
+
+        monkeypatch.setattr(fw_module, "get_sysfs_device_size_sectors", lambda drive: 1024 * 1024)
+        monkeypatch.setattr(fw_module, "wipe_superblock", lambda *args, **kwargs: None)
+        monkeypatch.setattr(fw_module, "write_gpt", lambda *args, **kwargs: True)
+        monkeypatch.setattr(fw_module, "reread_partitions", lambda drive: reread_calls.append(drive) or True)
+        monkeypatch.setattr(fw_module.time, "sleep", lambda seconds: None)
+
+        times = iter([0.0, 0.0, 0.2, 0.4, 0.6])
+        monkeypatch.setattr(fw_module.time, "monotonic", lambda: next(times, 0.8))
+
+        def fake_exists(path):
+            exists_calls.append(path)
+            return len(exists_calls) >= 3
+
+        monkeypatch.setattr(fw_module.os.path, "exists", fake_exists)
+
+        parts = create_partitions("/dev/sdb", fw_module.PartitionScheme.SIMPLE_FAT32)
+
+        assert parts == [{"role": "data", "path": "/dev/sdb1"}]
+        assert exists_calls == ["/dev/sdb1", "/dev/sdb1", "/dev/sdb1"]
+        assert reread_calls
+
+
+class TestGptHeaderCrc:
+    """Linux rejects GPT headers whose CRC covers padding beyond HeaderSize."""
+
+    def test_write_gpt_header_crc_uses_header_size(self, tmp_path, monkeypatch):
+        disk = tmp_path / "disk.img"
+        sectors = 4096
+        disk.write_bytes(b"\x00" * sectors * 512)
+
+        monkeypatch.setattr(block_ops_module, "get_sysfs_device_size_sectors", lambda device: sectors)
+
+        assert block_ops_module.write_gpt(
+            str(disk),
+            [{"role": "data", "start_lba": 2048, "size_lba": 1024, "name": "Windows Data"}],
+        )
+
+        with disk.open("rb") as f:
+            f.seek(512)
+            primary = f.read(512)
+            f.seek((sectors - 1) * 512)
+            backup = f.read(512)
+
+        for header in (primary, backup):
+            header_size = int.from_bytes(header[12:16], "little")
+            stored_crc = int.from_bytes(header[16:20], "little")
+            assert header_size == 92
+            assert stored_crc == block_ops_module._gpt_header_crc(header, header_size)
+
+
+class TestFlashWindowsCopyGuards:
+    """A failed target mount must not copy into a temp directory and report success."""
+
+    def test_mount_or_raise_fails_on_false_mount(self, monkeypatch):
+        monkeypatch.setattr(fw_module, "block_mount", lambda *args, **kwargs: False)
+
+        try:
+            fw_module._mount_or_raise("/dev/sdb1", "/tmp/target", fstype="vfat")
+        except OSError as e:
+            assert "Failed to mount /dev/sdb1" in str(e)
+        else:
+            raise AssertionError("_mount_or_raise must raise when block_mount returns False")
+
+    def test_verify_windows_media_copy_rejects_empty_target(self, tmp_path):
+        try:
+            fw_module._verify_windows_media_copy(str(tmp_path))
+        except OSError as e:
+            assert "Windows files were not copied" in str(e)
+        else:
+            raise AssertionError("empty target should not verify as flashed media")
+
+    def test_verify_windows_media_copy_accepts_windows_markers(self, tmp_path):
+        (tmp_path / "sources").mkdir()
+        (tmp_path / "bootmgr").write_bytes(b"boot")
+
+        fw_module._verify_windows_media_copy(str(tmp_path))
+
+
+class TestIsoMountOrder:
+    """Windows ISOs must prefer UDF over the tiny ISO9660 compatibility view."""
+
+    def test_mount_iso_tries_udf_before_iso9660(self, tmp_path, monkeypatch):
+        calls = []
+
+        monkeypatch.setattr(block_ops_module, "_setup_loop", lambda path: "/dev/loop-test")
+        monkeypatch.setattr(block_ops_module, "_detach_loop", lambda loop: None)
+
+        def fake_mount(source, target, fstype=None, flags=0, options=""):
+            calls.append(fstype)
+            return fstype == "udf"
+
+        monkeypatch.setattr(block_ops_module, "mount", fake_mount)
+
+        assert block_ops_module.mount_iso(str(tmp_path / "win.iso"), str(tmp_path / "mnt")) is True
+        assert calls == ["udf"]

@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QMainWindow,
     QWidget,
     QVBoxLayout,
@@ -53,7 +54,6 @@ from lufus.gui.i18n import load_translations
 from lufus.gui.redirector import StdoutRedirector
 from lufus.gui.dialogs import LogWindow, AboutWindow, SettingsDialog, WinTweaks
 from lufus.gui.workers import FlashWorker, VerifyWorker
-from lufus.writing.windows.tweaks import *
 
 # log level mapping for colors and methods
 _LOG_LEVELS = {
@@ -1537,10 +1537,14 @@ class LufusWindow(QMainWindow):
             self.verify_worker.start()
         else:
             # skip verification and start flash :3
-            if states.image_option == 0 and states.currentflash == 0:
+            if state.image_option == 0 and state.flash_mode == 0:
                 dlg = WinTweaks(self)
-                if dlg.exec() == QDialog.DialogCode.Rejected:
+                result = dlg.exec()
+                self.log_message(f"WinTweaks dialog closed with result: {result}")
+                if result == QDialog.DialogCode.Rejected:
+                    self.log_message("Flash cancelled in WinTweaks dialog", level="WARN")
                     return
+            self.log_message("Proceeding to perform_flash")
             self.perform_flash()
 
     def on_verify_finished(self, success: bool):
@@ -1549,7 +1553,7 @@ class LufusWindow(QMainWindow):
             self.log_message("SHA256 verification successful, proceeding to flash")
             self.progress_bar.setFormat("")
             self._clear_speed_eta()
-            if states.image_option == 0 and states.currentflash == 0:
+            if state.image_option == 0 and state.flash_mode == 0:
                 dlg = WinTweaks(self)
                 if dlg.exec() == QDialog.DialogCode.Rejected:
                     self.btn_start.setEnabled(True)
@@ -1574,6 +1578,7 @@ class LufusWindow(QMainWindow):
 
     def perform_flash(self):
         # Rufus-style warning before flashing :3
+        self.log_message("perform_flash: showing confirmation dialog")
         device_name = self.combo_device.currentText()
         warning_title = self._T.get("msgbox_flash_warning_title", "WARNING: ALL DATA ON DEVICE WILL BE DESTROYED!")
         warning_body = self._T.get(
@@ -1699,18 +1704,7 @@ class LufusWindow(QMainWindow):
             # flash succeeded :D
             self.progress_bar.setValue(100)
             self.progress_bar.setFormat(self._T.get("progress_complete", "Complete"))
-            # change from fo to tweaks
             self.log_message("Flash operation finished with result: SUCCESS")
-            if states.image_option == 0 and states.currentflash == 0:
-                if getattr(states, "win_hardware_bypass", 0) == 1:
-                    win_hardware_bypass()
-                if getattr(states, "win_microsoft_acc", 0) == 1:
-                    if getattr(states, "win_local_acc_chk", 0) == 1:
-                        win_local_acc_name()
-                    else:
-                        win_local_acc()
-                if getattr(states, "win_privacy", 0) == 1:
-                    win_skip_privacy_questions()
             QMessageBox.information(
                 self,
                 self._T.get("msgbox_success_title", "Success"),

@@ -31,20 +31,23 @@ def detect_system_language() -> str:
 
     Falls back to English if detection fails or no match is found.
     """
-    try:
-        # Read the system locale without mutating global locale state.
-        loc = locale.getdefaultlocale()
-    except Exception:
-        loc = (None, None)
+    # Read locale from environment directly (replaces deprecated
+    # locale.getdefaultlocale() which is removed in Python 3.15).
+    lang_code = ""
+    for var in ("LC_ALL", "LC_MESSAGES", "LC_CTYPE", "LANG", "LANGUAGE"):
+        val = os.environ.get(var)
+        if val:
+            lang_code = val
+            break
 
-    # Fallback to the process locale if the default locale could not be determined.
-    if not loc or not loc[0]:
+    # Fallback to the process locale if env vars are empty.
+    if not lang_code:
         try:
             loc = locale.getlocale()
+            if loc and loc[0]:
+                lang_code = loc[0]
         except Exception:
-            loc = (None, None)
-
-    lang_code = (loc[0] or "") or os.environ.get("LANG", "")
+            pass
 
     if not lang_code:
         return "English"

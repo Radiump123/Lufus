@@ -9,9 +9,12 @@ from typing import TypedDict
 from lufus import state
 from lufus.lufus_logging import get_logger
 from lufus.writing.partition_scheme import PartitionScheme
+from lufus.writing.windows.tweaks import apply_windows_tweaks
 from lufus.block_ops import (
     mount as block_mount,
+    mount_iso as block_mount_iso,
     umount as block_umount,
+    umount_iso as block_umount_iso,
     write_device_image,
     get_sysfs_device_size_sectors,
     wipe_superblock,
@@ -319,6 +322,28 @@ def _copy_efi_boot_files(iso_mount, mount_efi, _status):
     _fix_efi_bootloader(mount_efi)
 
 
+def _mount_or_raise(source: str, target: str, fstype: str | None = None) -> None:
+    if not block_mount(source, target, fstype=fstype):
+        raise OSError(f"Failed to mount {source} on {target}")
+
+
+def _data_partition_fstype(scheme: PartitionScheme) -> str | None:
+    if scheme == PartitionScheme.SIMPLE_FAT32:
+        return "vfat"
+    if scheme == PartitionScheme.WINDOWS_EXFAT:
+        return "exfat"
+    return None
+
+
+def _verify_windows_media_copy(mount_data: str) -> None:
+    sources_dir = os.path.join(mount_data, "sources")
+    bootmgr = _find_path_case_insensitive(mount_data, "bootmgr") or _find_path_case_insensitive(
+        mount_data, "bootmgr.efi"
+    )
+    if not os.path.isdir(sources_dir) or not bootmgr:
+        raise OSError(f"Windows files were not copied to mounted target {mount_data}")
+
+
 def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=None, status_cb=None) -> bool:
     """Flash a Windows ISO to a USB device.
 
@@ -400,14 +425,19 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
         # Step 4: Mount targets and copy files
         with tempfile.TemporaryDirectory() as mount_data:
             mount_efi = None
-            if efi_part and scheme == PartitionScheme.SIMPLE_FAT32:
-                mount_efi = tempfile.mkdtemp()
-                block_mount(efi_part, mount_efi, fstype="vfat")
-
-            _status(f"Mounting {data_part} -> {mount_data}")
-            block_mount(data_part, mount_data)
+            data_mounted = False
+            efi_mounted = False
 
             try:
+                if efi_part and scheme == PartitionScheme.SIMPLE_FAT32:
+                    mount_efi = tempfile.mkdtemp()
+                    _mount_or_raise(efi_part, mount_efi, fstype="vfat")
+                    efi_mounted = True
+
+                _status(f"Mounting {data_part} -> {mount_data}")
+                _mount_or_raise(data_part, mount_data, fstype=_data_partition_fstype(scheme))
+                data_mounted = True
+
                 # Step 5: Copy ISO contents
                 extract_used = sum(
                     os.path.getsize(os.path.join(dp, f)) for dp, _, files in os.walk(iso_mount) for f in files
@@ -433,6 +463,7 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
                 else:
                     _copy_direct(iso_mount, mount_data, extract_used, _status, _emit)
 
+                _verify_windows_media_copy(mount_data)
                 _status(f"install.wim/esd on data partition: {wim_size / 1024**3:.2f} GiB")
 
                 # Step 6: Copy EFI boot files
@@ -440,7 +471,17 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
                     _copy_efi_boot_files(iso_mount, mount_efi, _status)
                 _emit(88)
 
-                # Step 7: Sync
+                # Step 7: Apply Windows tweaks while the target partition is still mounted.
+                if any(
+                    getattr(state, attr, 0) == 1 for attr in ("win_hardware_bypass", "win_microsoft_acc", "win_privacy")
+                ):
+                    _status("Applying selected Windows tweaks...")
+                    if apply_windows_tweaks(mount_data):
+                        _status("Windows tweaks applied")
+                    else:
+                        _status("WARNING: one or more Windows tweaks failed; see log for details")
+
+                # Step 8: Sync
                 _status("Syncing all writes to disk...")
                 os.sync()
                 _emit(97)
@@ -452,10 +493,12 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
                 raise
             finally:
                 _status("Unmounting target partitions...")
-                if mount_efi:
+                if mount_efi and efi_mounted:
                     block_umount(mount_efi)
+                if mount_efi:
                     os.rmdir(mount_efi)
-                block_umount(mount_data)
+                if data_mounted:
+                    block_umount(mount_data)
                 _status("Unmount complete")
 
         _status("flash_windows: finished successfully, Windows USB is ready")
@@ -467,41 +510,62 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
         _status(f"flash_windows: failed: {e}")
         return False
     finally:
-        if iso_mount and os.path.ismount(iso_mount):
+        if iso_mount:
             _status(f"Unmounting ISO from {iso_mount}...")
-            block_umount(iso_mount)
+            block_umount_iso(iso_mount)
 
 
 # ---new---
 def mount_iso(iso_path: str) -> str | None:
-    """This function mounts an iso file at /mnt/iso/ and returns the location if mount is successfull
+    """Mount an ISO file at /mnt/iso/{name} using a loop device.
 
-    command:`sudo mount -o loop iso_path /mnt/iso/{iso name without extension}
+    Uses the pure-Python loop device helper from block_ops (no subprocess).
 
     Args:
-        iso_path (str): The location of the iso file
+        iso_path (str): Path to the ISO file.
 
     Returns:
-        str: the path where it's mounted
-        None: if mounting fails return None
+        str: The mount point path, or None on failure.
     """
     mount_base = "/mnt/iso"
     basename = os.path.basename(iso_path)
     iso_name_without_extension = os.path.splitext(basename)[0]
     iso_mount_location = os.path.join(mount_base, iso_name_without_extension)
 
-    try:
-        os.makedirs(iso_mount_location, exist_ok=True)
-        _status_print(f"Mounting {iso_path} in {iso_mount_location}")
-        if block_mount(iso_path, iso_mount_location, fstype="iso9660", flags=0):
-            _status_print(f"Success: Mounted {iso_path} to {iso_mount_location} successfully!")
-            return iso_mount_location
-        else:
-            _status_print(f"Failed: Failed to mount {iso_path} to {iso_mount_location} successfully!")
-            return None
-    except Exception as e:
-        _status_print(f"An error occured during mounting iso: {e}")
+    _status_print(f"Mounting {iso_path} in {iso_mount_location}")
+    if block_mount_iso(iso_path, iso_mount_location):
+        _status_print(f"Success: Mounted {iso_path} to {iso_mount_location} successfully!")
+        return iso_mount_location
+    else:
+        _status_print(f"Failed: Failed to mount {iso_path} to {iso_mount_location} successfully!")
         return None
+
+
+def _partition_paths_for(drive: str, count: int) -> list[str]:
+    identifier = os.path.basename(drive)
+    separator = "p" if identifier[-1].isdigit() else ""
+    return [f"{drive}{separator}{idx}" for idx in range(1, count + 1)]
+
+
+def _wait_for_partition_nodes(drive: str, paths: list[str], timeout: float = 10.0) -> bool:
+    """Wait for the kernel/udev to expose newly written partition nodes."""
+    deadline = time.monotonic() + timeout
+    reread_next = time.monotonic()
+    missing = paths
+
+    while time.monotonic() < deadline:
+        missing = [path for path in paths if not os.path.exists(path)]
+        if not missing:
+            return True
+
+        now = time.monotonic()
+        if now >= reread_next:
+            reread_partitions(drive)
+            reread_next = now + 1.0
+        time.sleep(0.2)
+
+    log.error("Timed out waiting for partition nodes on %s: missing %s", drive, missing)
+    return False
 
 
 def create_partitions(drive: str, scheme: PartitionScheme) -> list[PartitionInfo]:
@@ -539,17 +603,17 @@ def create_partitions(drive: str, scheme: PartitionScheme) -> list[PartitionInfo
         if not write_gpt(drive, partitions_spec):
             raise RuntimeError(f"Failed to write GPT to {drive}")
 
-        reread_partitions(drive)
-        time.sleep(0.5)
-
-        identifier = os.path.basename(drive)
-        separator = "p" if identifier[-1].isdigit() else ""
         num_parts = len(partitions_spec)
+        partition_paths = _partition_paths_for(drive, num_parts)
+
+        reread_partitions(drive)
+        if not _wait_for_partition_nodes(drive, partition_paths):
+            raise RuntimeError(f"Partition nodes did not appear for {drive}: {partition_paths}")
 
         if num_parts > 1:
-            return [{"role": "data", "path": f"{drive}{separator}1"}, {"role": "efi", "path": f"{drive}{separator}2"}]
+            return [{"role": "data", "path": partition_paths[0]}, {"role": "efi", "path": partition_paths[1]}]
         else:
-            return [{"role": "data", "path": f"{drive}{separator}1"}]
+            return [{"role": "data", "path": partition_paths[0]}]
 
     except Exception as e:
         print(f"Error partitioning {drive}: {e}")

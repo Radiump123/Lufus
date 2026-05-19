@@ -301,6 +301,7 @@ class SettingsDialog(QDialog):
 class WinTweaks(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._T = parent._T if parent else {}
         re = QRegularExpression("^[a-zA-Z0-9_]*$")
         validator = QRegularExpressionValidator(re)
         self.setWindowTitle("Windows Tweaks (MAY BREAK! USE CAUTION)")

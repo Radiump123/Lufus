@@ -52,6 +52,7 @@ rm -rf build dist AppDir
 $PYTHON -m PyInstaller src/lufus/__main__.py \
     --name lufus \
     --windowed \
+    --clean \
     --paths src \
     --hidden-import PyQt6.QtCore \
     --hidden-import PyQt6.QtGui \
@@ -68,6 +69,18 @@ $PYTHON -m PyInstaller src/lufus/__main__.py \
 # ----------------------------------------------------------------
 mkdir -p AppDir/usr/bin
 cp -r dist/lufus/* AppDir/usr/bin/
+
+# Bundle system binaries needed at runtime (same list as build-standalone.sh)
+for bin in \
+    mkfs.vfat mkfs.ntfs mkfs.exfat mkfs.ext4 mkudffs \
+    ntfslabel fatlabel e2label udflabel \
+    badblocks wimlib-imagex chntpw \
+    udevadm xdg-open; do
+    path=$(command -v "$bin" 2>/dev/null || true)
+    if [ -n "$path" ]; then
+        cp "$path" AppDir/usr/bin/
+    fi
+done
 
 # Create desktop file
 cat > AppDir/lufus.desktop <<'DESKTOP'
