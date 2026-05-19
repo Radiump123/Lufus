@@ -5,6 +5,7 @@ import glob
 import tempfile
 import re
 import time
+import shlex
 from typing import TypedDict
 from lufus import state
 from lufus.lufus_logging import get_logger
@@ -34,9 +35,10 @@ def run_cmd(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess |
     (mkfs.*, wimlib-imagex, package managers).
     """
     try:
+        log.info("Executing: %s", shlex.join(cmd))
         return subprocess.run(cmd, check=check, shell=False)
     except subprocess.CalledProcessError as e:
-        log.error("run_cmd failed: %s — %s", " ".join(cmd), e)
+        log.error("run_cmd failed: %s — %s", shlex.join(cmd), e)
         if check:
             raise
         return None
@@ -189,7 +191,7 @@ def _find_ntfs_tool(status_cb=None) -> str | None:
     ]
     for pm_cmd in pkg_managers:
         if shutil.which(pm_cmd[0]):
-            run_cmd(["sudo"] + pm_cmd)
+            run_cmd(pm_cmd)
             break
 
     for candidate in ["mkfs.ntfs", "mkntfs"]:
@@ -213,7 +215,7 @@ def _ensure_wimlib(status_cb=None) -> None:
     ]
     for pm_cmd in pkg_managers:
         if shutil.which(pm_cmd[0]):
-            run_cmd(["sudo"] + pm_cmd)
+            run_cmd(pm_cmd)
             break
     if not shutil.which("wimlib-imagex"):
         raise FileNotFoundError(
@@ -408,13 +410,13 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
             if ntfs_cmd is None:
                 raise FileNotFoundError("mkfs.ntfs / mkntfs not found. Install ntfs-3g.")
             _status(f"Formatting {data_part} as {scheme.name}...")
-            run_cmd(["sudo", ntfs_cmd, "-f", "-L", "WINDOWS", data_part])
+            run_cmd([ntfs_cmd, "-f", "-L", "WINDOWS", data_part])
         elif scheme == PartitionScheme.WINDOWS_EXFAT:
             _status(f"Formatting {data_part} as {scheme.name}...")
-            run_cmd(["sudo", "mkfs.exfat", "-n", "WINDOWS", data_part])
+            run_cmd(["mkfs.exfat", "-n", "WINDOWS", data_part])
         elif scheme == PartitionScheme.SIMPLE_FAT32:
             _status(f"Formatting {data_part} as FAT32...")
-            run_cmd(["sudo", "mkfs.vfat", "-F32", "-n", "WINDOWS", data_part])
+            run_cmd(["mkfs.vfat", "-F32", "-n", "WINDOWS", data_part])
 
         if efi_part and scheme in (PartitionScheme.WINDOWS_NTFS, PartitionScheme.WINDOWS_EXFAT):
             uefi_ntfs_img = find_uefi_ntfs_img(status_cb=_status)
@@ -582,15 +584,26 @@ def create_partitions(drive: str, scheme: PartitionScheme) -> list[PartitionInfo
         efi_sectors = 2 * sectors_per_mib  # 2 MiB for EFI partition
         alignment = 2048  # sectors (1 MiB alignment, standard)
 
+        # GPT backup is 33 sectors (1 header + 32 entries).
+        # Last usable LBA is total - 1 (backup header) - 32 (backup entries) - 1.
+        last_usable = total_sectors - 34
+
+        # Layout:
+        # [MBR+GPT] [Data Partition] [Gap/Alignment] [EFI Partition] [Backup GPT]
+        # We place the EFI partition at the very end of the usable space.
+        efi_end = last_usable
+        efi_start = efi_end - efi_sectors + 1
+
+        # Data partition starts at 'alignment' and ends before efi_start, aligned.
         data_start = alignment
-        data_end = total_sectors - efi_sectors - alignment
-        data_size = data_end - data_start
+        data_end = (efi_start // alignment) * alignment - 1
+        data_size = data_end - data_start + 1
 
         # Build partition list for our native GPT writer
         if scheme in (PartitionScheme.WINDOWS_NTFS, PartitionScheme.WINDOWS_EXFAT):
             partitions_spec = [
                 {"role": "data", "start_lba": data_start, "size_lba": data_size, "name": "Windows Data"},
-                {"role": "efi", "start_lba": data_end + alignment, "size_lba": efi_sectors, "name": "EFI System"},
+                {"role": "efi", "start_lba": efi_start, "size_lba": efi_sectors, "name": "EFI System"},
             ]
         elif scheme == PartitionScheme.SIMPLE_FAT32:
             partitions_spec = [
@@ -600,6 +613,7 @@ def create_partitions(drive: str, scheme: PartitionScheme) -> list[PartitionInfo
             raise ValueError(f"Invalid partition scheme: {scheme}")
 
         wipe_superblock(drive, size_mb=1)
+        reread_partitions(drive)
         if not write_gpt(drive, partitions_spec):
             raise RuntimeError(f"Failed to write GPT to {drive}")
 

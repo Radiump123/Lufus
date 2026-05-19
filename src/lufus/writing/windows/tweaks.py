@@ -11,6 +11,7 @@ import subprocess
 import os
 import shutil
 import tempfile
+import shlex
 from lufus.utils import get_mount_and_drive
 from lufus import state
 from lufus.lufus_logging import get_logger
@@ -59,16 +60,24 @@ def _modify_boot_wim_registry(mount: str, hive: str, commands: list[str], label:
     temp_mount = tempfile.mkdtemp(prefix="lufus-winwim-")
     mounted = False
     try:
-        subprocess.run(["wimmountrw", boot_wim, "2", temp_mount], check=True)
+        cmd1 = ["wimmountrw", boot_wim, "2", temp_mount]
+        log.info("Executing: %s", shlex.join(cmd1))
+        subprocess.run(cmd1, check=True)
         mounted = True
+
+        cmd2 = ["chntpw", "e", os.path.join(temp_mount, "Windows", "System32", "config", hive)]
+        log.info("Executing: %s (with registry commands)", shlex.join(cmd2))
         subprocess.run(
-            ["chntpw", "e", os.path.join(temp_mount, "Windows", "System32", "config", hive)],
+            cmd2,
             input=cmd_string,
             text=True,
             capture_output=True,
             check=True,
         )
-        subprocess.run(["wimunmount", temp_mount, "--commit"], check=True)
+
+        cmd3 = ["wimunmount", temp_mount, "--commit"]
+        log.info("Executing: %s", shlex.join(cmd3))
+        subprocess.run(cmd3, check=True)
         mounted = False
         log.info("%s: boot.wim registry changes applied successfully.", label)
         return True
@@ -77,7 +86,9 @@ def _modify_boot_wim_registry(mount: str, hive: str, commands: list[str], label:
         return False
     finally:
         if mounted:
-            subprocess.run(["wimunmount", temp_mount, "--discard"], check=False)
+            cmd_f = ["wimunmount", temp_mount, "--discard"]
+            log.info("Cleanup: Executing %s", shlex.join(cmd_f))
+            subprocess.run(cmd_f, check=False)
         shutil.rmtree(temp_mount, ignore_errors=True)
 
 

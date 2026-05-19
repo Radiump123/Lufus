@@ -25,7 +25,7 @@ def _pvd_offset(lba: int) -> int:
 class _DirRecord:
     """ISO 9660 directory record."""
 
-    __slots__ = ("name", "extent_lba", "data_length", "is_dir", "flags", "id_len")
+    __slots__ = ("name", "extent_lba", "data_length", "is_dir", "flags", "id_len", "_total_len")
 
     def __init__(self, data: bytes, offset: int):
         dr_len = data[offset]

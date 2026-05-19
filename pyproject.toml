@@ -7,7 +7,7 @@ name = "lufus"
 version = "1.0.0"  # keep synced with [tool.briefcase] version
 description = "A rufus clone written in Python and designed to work with Linux."
 readme = "README.md"
-license = "MIT"
+license = {text = "MIT"}
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
@@ -33,7 +33,7 @@ project_name = "Lufus"
 bundle = "com.github.hogjects"
 version = "1.0.0"  # keep synced with [project] version
 url = "https://github.com/Hogjects/Lufus"
-license = "MIT"
+license.text = "MIT"
 license-files = ["LICENSE"]
 author = "Hogjects"
 author_email = "example@example.com"

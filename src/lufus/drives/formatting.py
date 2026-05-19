@@ -5,6 +5,7 @@ import sys
 import os
 import glob
 import time
+import errno
 from pathlib import Path
 from lufus import state
 from lufus.drives import find_usb as fu
@@ -17,6 +18,7 @@ from lufus.block_ops import (
     get_logical_block_size,
     write_single_partition_table,
     reread_partitions,
+    wipe_superblock,
 )
 
 log = get_logger(__name__)
@@ -67,12 +69,18 @@ def unmount(drive: str = None) -> bool:
     targets = glob.glob(f"{drive}*")
     log.info("Unmounting %s...", drive)
     for target in targets:
-        if umount_lazy(target):
+        err = umount_lazy(target)
+        if err == 0:
             time.sleep(0.5)
             log.info("Unmounted %s successfully.", target)
-        else:
+        elif err in (errno.EINVAL, errno.ENOENT):
             # Target may already be unmounted — not a fatal error
             log.info("Unmounted %s (was already unmounted or not a mount).", target)
+        else:
+            # Real failure (e.g. EBUSY)
+            log.error("Failed to unmount %s: errno=%d (%s)", target, err, os.strerror(err))
+            unmount_fail()
+            return False
     time.sleep(0.5)
     return True
 
@@ -335,18 +343,15 @@ def disk_format(status_cb=None) -> bool:
     # Raw device writes work even on mounted devices.  Once the signature
     # is gone, udev won't auto-mount the partition after unmount (it finds
     # no recognizable filesystem).
-    zeros = b"\x00" * 4096
     for part in sorted(glob.glob(f"{raw_device}[0-9]*"), reverse=True):
-        try:
-            with os.fdopen(os.open(part, os.O_WRONLY | os.O_CLOEXEC), "wb", buffering=0) as f:
-                for _ in range(512):  # wipe first 2 MiB
-                    f.write(zeros)
-        except OSError:
-            pass  # partition may not exist yet — that's fine
+        # Wipe first 2 MiB of each partition
+        wipe_superblock(part, size_mb=2, wipe_end=False)
 
     # Unmount now that signatures are gone — udev won't re-mount.
     for part in sorted(glob.glob(f"{raw_device}[0-9]*"), reverse=True):
-        umount_lazy(part)
+        err = umount_lazy(part)
+        if err != 0 and err not in (errno.EINVAL, errno.ENOENT):
+            log.warning("Final unmount of %s failed: errno=%d", part, err)
         time.sleep(0.2)
 
     tool_name, args_fn, fs_label, install_hint = fs_configs[fs_type]

@@ -1646,6 +1646,7 @@ class LufusWindow(QMainWindow):
         self.btn_cancel.setEnabled(True)
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("")
         self._speed_timer.start()
         self.statusBar.showMessage(self._T.get("status_flashing", "Flashing..."), 0)
 
@@ -1686,6 +1687,7 @@ class LufusWindow(QMainWindow):
         self.btn_cancel.setEnabled(True)
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("")
         self._speed_timer.start()
         self.statusBar.showMessage(self._T.get("status_flashing", "Flashing..."), 0)
 

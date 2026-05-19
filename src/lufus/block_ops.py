@@ -155,11 +155,11 @@ def _resolve_mount_point(device_or_path: str) -> str | None:
     return device_or_path
 
 
-def umount(target: str, flags: int = 0) -> bool:
-    """Unmount a filesystem via the umount(2) syscall.
+def umount(target: str, flags: int = 0) -> int:
+    """Unmount a filesystem via the umount2(2) syscall.
 
     Accepts either a mount point directory or a block device path.
-    Returns True on success, False on failure.
+    Returns 0 on success, or an errno value on failure.
     """
     mount_point = _resolve_mount_point(target)
     libc = _get_libc()
@@ -169,15 +169,18 @@ def umount(target: str, flags: int = 0) -> bool:
 
     ret = libc.umount2(c_target, c_flags)
     if ret != 0:
-        errno = ctypes.get_errno()
-        log.warning("umount(%s) failed: errno=%d", target, errno)
-        return False
+        err = ctypes.get_errno()
+        # EINVAL = not a mount point, ENOENT = path doesn't exist.
+        # These are usually benign during cleanup.
+        if err not in (errno.EINVAL, errno.ENOENT):
+            log.warning("umount(%s) failed: errno=%d (%s)", target, err, os.strerror(err))
+        return err
     log.info("Unmounted %s", target)
-    return True
+    return 0
 
 
-def umount_lazy(target: str) -> bool:
-    """Lazy unmount (equivalent to umount -l). Returns True on success."""
+def umount_lazy(target: str) -> int:
+    """Lazy unmount (equivalent to umount -l). Returns 0 on success, or errno on failure."""
     return umount(target, flags=_MNT_DETACH)
 
 
@@ -202,16 +205,27 @@ def reread_partitions(device: str) -> bool:
     Returns True on success.
     """
     import fcntl
+    import time
+    import errno
 
     fd = _open_device_ro(device)
     if fd is None:
         return False
     try:
-        fcntl.ioctl(fd, _BLKRRSET)
-        log.info("Partition table re-read on %s", device)
-        return True
-    except OSError as e:
-        log.warning("BLKRRPART on %s failed: %s", device, e)
+        # Retry up to 3 times on EBUSY (16), which happens if the device
+        # or its partitions are currently being accessed by udev or the kernel.
+        for attempt in range(3):
+            try:
+                fcntl.ioctl(fd, _BLKRRSET)
+                log.info("Partition table re-read on %s", device)
+                return True
+            except OSError as e:
+                if e.errno == errno.EBUSY and attempt < 2:
+                    log.debug("BLKRRPART on %s busy, retrying in 0.5s...", device)
+                    time.sleep(0.5)
+                    continue
+                log.warning("BLKRRPART on %s failed: %s", device, e)
+                return False
         return False
     finally:
         os.close(fd)
@@ -306,8 +320,13 @@ def mount_iso(iso_path: str, mount_point: str) -> bool:
 
 
 def umount_iso(mount_point: str) -> bool:
-    """Unmount an ISO mounted via mount_iso and detach its loop device."""
-    ok = umount(mount_point)
+    """Unmount an ISO mounted via mount_iso and detach its loop device.
+
+    Returns True if unmount was successful (0 or benign error).
+    """
+    err = umount(mount_point)
+    # Success (0) or not a mount point (EINVAL/ENOENT) is considered "OK" here
+    ok = err == 0 or err in (errno.EINVAL, errno.ENOENT)
     loop_dev = _loop_devices.pop(mount_point, None)
     if loop_dev:
         _detach_loop(loop_dev)
@@ -572,8 +591,8 @@ def write_single_partition_table(device: str, scheme: str = "gpt") -> bool:
         return False
 
 
-def wipe_superblock(device: str, size_mb: int = 5) -> bool:
-    """Zero out the first and last *size_mb* MB of a device.
+def wipe_superblock(device: str, size_mb: int = 5, wipe_end: bool = True) -> bool:
+    """Zero out the first and (optionally) last *size_mb* MB of a device.
 
     This removes filesystem signatures and partition tables without
     needing wipefs(8).  Equivalent to:
@@ -590,13 +609,13 @@ def wipe_superblock(device: str, size_mb: int = 5) -> bool:
                 f.write(zeros)
                 written += len(zeros)
             # Zero last size_mb MB
-            if total_size and total_size > size * 2:
+            if wipe_end and total_size and total_size > size * 2:
                 f.seek(-size, os.SEEK_END)
                 written = 0
                 while written < size:
                     f.write(zeros)
                     written += len(zeros)
-        log.info("Wiped superblock on %s (%d MB)", device, size_mb)
+        log.info("Wiped superblock on %s (%d MB, wipe_end=%s)", device, size_mb, wipe_end)
         return True
     except OSError as e:
         log.error("Failed to wipe superblock on %s: %s", device, e)
