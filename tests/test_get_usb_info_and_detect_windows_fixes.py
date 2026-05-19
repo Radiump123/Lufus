@@ -1,5 +1,4 @@
 from __future__ import annotations
-import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,15 +18,6 @@ def _fake_partitions(mount, device):
     return lambda all=False: [SimpleNamespace(mountpoint=mount, device=device)]
 
 
-def _fake_check_output(size="1000000000", label="MY_USB"):
-    def impl(cmd, **kwargs):
-        if "SIZE" in cmd:
-            return size + "\n"
-        return label + "\n"
-
-    return impl
-
-
 class Testget_usb_infoNormalisedMountPath:
     """mount_path in the returned dict must be the normalised path, not the
     raw input.  Before the fix, passing '/media/u/USB/' returned that exact
@@ -36,14 +26,16 @@ class Testget_usb_infoNormalisedMountPath:
 
     def test_trailing_slash_is_stripped(self, monkeypatch):
         monkeypatch.setattr(gui_module.psutil, "disk_partitions", _fake_partitions("/media/u/USB/", "/dev/sdb1"))
-        monkeypatch.setattr(gui_module.subprocess, "check_output", _fake_check_output())
+        monkeypatch.setattr(gui_module, "get_device_size", lambda dev: 1000000000)
+        monkeypatch.setattr(gui_module, "get_device_label", lambda dev: "MY_USB")
         result = get_usb_info("/media/u/USB/")
         assert result["mount_path"] == "/media/u/USB"
 
     def test_normalised_path_matches_normpath(self, monkeypatch, tmp_path):
         mount = str(tmp_path)
         monkeypatch.setattr(gui_module.psutil, "disk_partitions", _fake_partitions(mount, "/dev/sdc1"))
-        monkeypatch.setattr(gui_module.subprocess, "check_output", _fake_check_output())
+        monkeypatch.setattr(gui_module, "get_device_size", lambda dev: 1000000000)
+        monkeypatch.setattr(gui_module, "get_device_label", lambda dev: "MY_USB")
         result = get_usb_info(mount)
         import os
 
@@ -67,26 +59,16 @@ class Testget_usb_infoAllTrue:
         assert calls.get("all") is True
 
 
-class Testget_usb_infoTimeoutExpired:
-    """TimeoutExpired was previously swallowed by the broad Exception handler
-    with a generic message.  It must now be caught explicitly.
-    """
+class Testget_usb_infoSysfsFailure:
+    """sysfs failures should not crash get_usb_info."""
 
-    def test_returns_empty_dict_on_timeout(self, monkeypatch):
+    def test_returns_device_info_even_when_sysfs_fails(self, monkeypatch):
         monkeypatch.setattr(gui_module.psutil, "disk_partitions", _fake_partitions("/media/u/USB", "/dev/sdb1"))
-
-        def raise_timeout(*args, **kwargs):
-            raise subprocess.TimeoutExpired(cmd="lsblk", timeout=5)
-
-        monkeypatch.setattr(gui_module.subprocess, "check_output", raise_timeout)
+        monkeypatch.setattr(gui_module, "get_device_size", lambda dev: None)
+        monkeypatch.setattr(gui_module, "get_device_label", lambda dev: None)
         result = get_usb_info("/media/u/USB")
-        assert result is None
-
-    def test_timeout_handler_is_explicit(self):
-        import inspect
-
-        src = inspect.getsource(get_usb_info)
-        assert "TimeoutExpired" in src
+        assert result is not None
+        assert result["label"] is not None  # falls back to mount basename
 
 
 class Testget_usb_infoForElse:

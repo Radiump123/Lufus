@@ -10,6 +10,14 @@ from lufus import state
 from lufus.drives import find_usb as fu
 from lufus.utils import strip_partition_suffix, require_root, get_mount_and_drive
 from lufus.lufus_logging import get_logger
+from lufus.block_ops import (
+    mount as block_mount,
+    umount as block_umount,
+    umount_lazy,
+    get_logical_block_size,
+    write_single_partition_table,
+    reread_partitions,
+)
 
 log = get_logger(__name__)
 
@@ -59,23 +67,12 @@ def unmount(drive: str = None) -> bool:
     targets = glob.glob(f"{drive}*")
     log.info("Unmounting %s...", drive)
     for target in targets:
-        try:
-            subprocess.run(["umount", "-l", target], check=True)
+        if umount_lazy(target):
             time.sleep(0.5)
             log.info("Unmounted %s successfully.", target)
-        except subprocess.CalledProcessError as e:
-            # exit 32 = "not mounted" on Linux — acceptable when clearing a drive
-            if e.returncode == 32:
-                log.info("Unmounted %s (was already unmounted).", target)
-                continue
-            log.error("umount -l %s exited with code %d", target, e.returncode)
-            unmount_fail()
-            return False
-        except Exception as e:
-            log.error("(UMNTFUNC) Unexpected error type: %s — %s", type(e).__name__, e)
-            log_unexpected_error()
-            return False
-    subprocess.run(["udevadm", "settle"])
+        else:
+            # Target may already be unmounted — not a fatal error
+            log.info("Unmounted %s (was already unmounted or not a mount).", target)
     time.sleep(0.5)
     return True
 
@@ -98,10 +95,9 @@ def remount(drive: str = None) -> bool:
         return False
     log.info("Remounting %s -> %s...", drive, mount)
     try:
-        subprocess.run(["mount", drive, mount], check=True)
-        log.info("Remounted %s -> %s successfully.", drive, mount)
-        return True
-    except subprocess.CalledProcessError:
+        if block_mount(drive, mount):
+            log.info("Remounted %s -> %s successfully.", drive, mount)
+            return True
         format_fail()
         return False
     except Exception as e:
@@ -196,43 +192,27 @@ def get_format_geometry() -> tuple[int, int, int]:
 #     pass
 
 
-def check_device_bad_blocks() -> bool:
+def check_device_bad_blocks(passes: int = 1) -> bool:
     """Check the device for bad blocks using badblocks.
-    Requires the drive to be unmounted.  The number of passes is determined by
-    state.check_bad (0 = 1 pass read-only, 1 = 2 passes read/write).
+    Requires the drive to be unmounted.  *passes* controls how many
+    passes badblocks runs (1 = read-only, 2+ = non-destructive read-write).
     """
     _, drive, _ = _get_mount_and_drive()
     if not drive:
         log.error("No drive node found. Cannot check for bad blocks.")
         return False
 
-    passes = 2 if state.check_bad else 1
-
     # Probe the device's logical sector size so badblocks uses the real
     # device geometry. Fall back to 4096 bytes if detection fails.
     logical_block_size = 4096
     try:
-        probe = subprocess.run(
-            [_find_tool("blockdev"), "--getss", drive],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if probe.returncode == 0:
-            probed = probe.stdout.strip()
-            if probed.isdigit():
-                logical_block_size = int(probed)
-            else:
-                log.warning(
-                    "Unexpected blockdev output for %r: %r. Using default block size.",
-                    drive,
-                    probed,
-                )
+        probed = get_logical_block_size(drive)
+        if probed is not None:
+            logical_block_size = probed
         else:
             log.warning(
-                "blockdev failed for %s (exit %d). Using default block size.",
+                "Could not probe sector size for %s. Using default block size.",
                 drive,
-                probe.returncode,
             )
     except Exception as exc:
         log.warning(
@@ -242,10 +222,10 @@ def check_device_bad_blocks() -> bool:
         )
 
     # -s = show progress, -v = verbose output
-    # -n = non-destructive read-write test (safe default)
+    # -p = number of passes, -n = non-destructive read-write test (for >1 pass)
     args = [_find_tool("badblocks"), "-sv", "-b", str(logical_block_size)]
     if passes > 1:
-        args.append("-n")  # non-destructive read-write
+        args.extend(["-n", "-p", str(passes)])
     args.append(drive)
 
     log.info(
@@ -351,10 +331,29 @@ def disk_format(status_cb=None) -> bool:
         log_unexpected_error()
         return False
 
+    # Wipe filesystem signatures on ALL partitions *before* unmounting.
+    # Raw device writes work even on mounted devices.  Once the signature
+    # is gone, udev won't auto-mount the partition after unmount (it finds
+    # no recognizable filesystem).
+    zeros = b"\x00" * 4096
+    for part in sorted(glob.glob(f"{raw_device}[0-9]*"), reverse=True):
+        try:
+            with os.fdopen(os.open(part, os.O_WRONLY | os.O_CLOEXEC), "wb", buffering=0) as f:
+                for _ in range(512):  # wipe first 2 MiB
+                    f.write(zeros)
+        except OSError:
+            pass  # partition may not exist yet — that's fine
+
+    # Unmount now that signatures are gone — udev won't re-mount.
+    for part in sorted(glob.glob(f"{raw_device}[0-9]*"), reverse=True):
+        umount_lazy(part)
+        time.sleep(0.2)
+
     tool_name, args_fn, fs_label, install_hint = fs_configs[fs_type]
+    tool = _find_tool(tool_name)
+    cmd = [tool] + args_fn()
+
     try:
-        tool = _find_tool(tool_name)
-        cmd = [tool] + args_fn()
         _status(f"Running: {' '.join(cmd)}")
         subprocess.run(cmd, check=True)
         _status(f"Successfully formatted {raw_device} as {fs_label}.")
@@ -388,41 +387,13 @@ def _apply_partition_scheme(drive: str) -> None:
     scheme_name = "GPT" if scheme == 0 else "MBR"
     log.info("Applying %s partition scheme to %s...", scheme_name, raw_device)
     try:
-        if scheme == 0:
-            # GPT — used for UEFI targets
-            subprocess.run([_find_tool("parted"), "-s", raw_device, "mklabel", "gpt"], check=True)
-            subprocess.run(
-                [
-                    _find_tool("parted"),
-                    "-s",
-                    raw_device,
-                    "mkpart",
-                    "primary",
-                    "1MiB",
-                    "100%",
-                ],
-                check=True,
-            )
+        scheme_key = "gpt" if scheme == 0 else "mbr"
+        if write_single_partition_table(raw_device, scheme=scheme_key):
+            log.info("Partition scheme %s applied to %s.", scheme_name, raw_device)
         else:
-            # MBR — used for BIOS/legacy targets
-            subprocess.run([_find_tool("parted"), "-s", raw_device, "mklabel", "msdos"], check=True)
-            subprocess.run(
-                [
-                    _find_tool("parted"),
-                    "-s",
-                    raw_device,
-                    "mkpart",
-                    "primary",
-                    "1MiB",
-                    "100%",
-                ],
-                check=True,
-            )
-        log.info("Partition scheme %s applied to %s.", scheme_name, raw_device)
+            log.error("(PARTITION) Failed to apply partition scheme.")
     except FileNotFoundError:
         log.error("'parted' not found. Install parted.")
-    except subprocess.CalledProcessError as e:
-        log.error("(PARTITION) Failed to apply partition scheme: %s", e)
     except Exception as e:
         log.error("(PARTITION) Unexpected error: %s: %s", type(e).__name__, e)
         log_unexpected_error()
@@ -433,17 +404,15 @@ def drive_repair() -> None:
     # add smartctl check if possible
     # use fsck to prevent deletion of files for repair
     # use testdisk for partition recovery if possible
-    # do dd if=/dev/zero of=/dev/sdX bs=1M count=10 conv=notrunc before sfdisk use
     _, drive, _ = _get_mount_and_drive()
     if not drive:
         log.error("No drive node found. Cannot repair.")
         return
     raw_device = strip_partition_suffix(drive)
-    cmd = [_find_tool("sfdisk"), raw_device]
     log.info("Attempting drive repair on %s (raw: %s)...", drive, raw_device)
     try:
-        subprocess.run(["umount", drive], check=True)
-        subprocess.run(cmd, input=b",,0c;\n", check=True)
+        block_umount(drive)
+        write_single_partition_table(raw_device, scheme="mbr")
         subprocess.run([_find_tool("mkfs.vfat"), "-F", "32", "-n", "REPAIRED", drive], check=True)
         log.info("Successfully repaired drive %s (FAT32).", drive)
     except Exception as e:

@@ -3,27 +3,48 @@ import subprocess
 import os
 import glob
 import tempfile
-import contextlib
 import re
 import time
 from typing import TypedDict
 from lufus import state
 from lufus.lufus_logging import get_logger
 from lufus.writing.partition_scheme import PartitionScheme
+from lufus.writing.windows.tweaks import apply_windows_tweaks
+from lufus.block_ops import (
+    mount as block_mount,
+    mount_iso as block_mount_iso,
+    umount as block_umount,
+    umount_iso as block_umount_iso,
+    write_device_image,
+    get_sysfs_device_size_sectors,
+    wipe_superblock,
+    write_single_partition_table,
+    write_gpt,
+    reread_partitions,
+)
 
 
 log = get_logger(__name__)
 
 
+def run_cmd(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess | None:
+    """Run an external command via subprocess.
+
+    Used only for tools that have no pure Python equivalent
+    (mkfs.*, wimlib-imagex, package managers).
+    """
+    try:
+        return subprocess.run(cmd, check=check, shell=False)
+    except subprocess.CalledProcessError as e:
+        log.error("run_cmd failed: %s — %s", " ".join(cmd), e)
+        if check:
+            raise
+        return None
+
+
 class PartitionInfo(TypedDict):
     role: str
     path: str
-
-
-def run_cmd(cmd):
-    """Wrapper for subprocess.run with logging and error checking."""
-    log.debug("run: %s", cmd)
-    subprocess.run(cmd, check=True)
 
 
 def _status_print(msg: str):
@@ -71,12 +92,12 @@ def _fix_efi_bootloader(efi_mount):
 
     log.info("EFI bootloader fix: BOOTX64.EFI not found, will attempt to create at %s", boot_dir)
     bootx64 = os.path.join(boot_dir, "BOOTX64.EFI")
-    run_cmd(["sudo", "mkdir", "-p", boot_dir])
+    os.makedirs(boot_dir, exist_ok=True)
     log.info("EFI bootloader fix: created directory %s", boot_dir)
 
     src = _find_path_case_insensitive(efi_mount, "EFI", "Microsoft", "Boot", "bootmgfw.efi")
     if src:
-        run_cmd(["sudo", "cp", src, bootx64])
+        shutil.copy2(src, bootx64)
         log.info("EFI bootloader fix: copied %s -> %s", src, bootx64)
         return
 
@@ -155,7 +176,7 @@ def _copy_tree_with_progress(
 def _find_ntfs_tool(status_cb=None) -> str | None:
     """Find mkfs.ntfs/mkntfs, installing ntfs-3g if needed. Returns command name or None."""
     for candidate in ["mkfs.ntfs", "mkntfs"]:
-        if subprocess.run(["which", candidate], capture_output=True).returncode == 0:
+        if shutil.which(candidate):
             return candidate
 
     if status_cb:
@@ -167,21 +188,20 @@ def _find_ntfs_tool(status_cb=None) -> str | None:
         ["zypper", "install", "-y", "ntfs-3g"],
     ]
     for pm_cmd in pkg_managers:
-        if subprocess.run(["which", pm_cmd[0]], capture_output=True).returncode == 0:
+        if shutil.which(pm_cmd[0]):
             run_cmd(["sudo"] + pm_cmd)
-            break  # stop after the first working package manager
+            break
 
-    # Re-check after installation attempt
     for candidate in ["mkfs.ntfs", "mkntfs"]:
-        if subprocess.run(["which", candidate], capture_output=True).returncode == 0:
-            return candidate  # installation succeeded
+        if shutil.which(candidate):
+            return candidate
 
     return None
 
 
 def _ensure_wimlib(status_cb=None) -> None:
     """Install wimlib-imagex if not present. Raises FileNotFoundError if it can't be found after install."""
-    if subprocess.run(["which", "wimlib-imagex"], capture_output=True).returncode == 0:
+    if shutil.which("wimlib-imagex"):
         return
     if status_cb:
         status_cb("wimlib-imagex not found, attempting to install...")
@@ -192,10 +212,10 @@ def _ensure_wimlib(status_cb=None) -> None:
         ["zypper", "install", "-y", "wimtools"],
     ]
     for pm_cmd in pkg_managers:
-        if subprocess.run(["which", pm_cmd[0]], capture_output=True).returncode == 0:
+        if shutil.which(pm_cmd[0]):
             run_cmd(["sudo"] + pm_cmd)
             break
-    if subprocess.run(["which", "wimlib-imagex"], capture_output=True).returncode != 0:
+    if not shutil.which("wimlib-imagex"):
         raise FileNotFoundError(
             "wimlib-imagex not found. Install manually: sudo pacman -S wimlib  /  sudo apt install wimtools"
         )
@@ -271,23 +291,57 @@ def _copy_efi_boot_files(iso_mount, mount_efi, _status):
     if efi_src:
         efi_items = os.listdir(efi_src)
         _status(f"Found EFI/ with {len(efi_items)} items: {efi_items}")
-        run_cmd(["sudo", "cp", "-r"] + [os.path.join(efi_src, i) for i in efi_items] + [mount_efi])
+        for item in efi_items:
+            src = os.path.join(efi_src, item)
+            dst = os.path.join(mount_efi, item)
+            if os.path.isdir(src):
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src, dst)
         _status("Copied EFI/ tree to EFI partition")
     else:
         _status("WARNING: No EFI directory found in ISO - drive may not be UEFI bootable")
 
     boot_src = _find_path_case_insensitive(iso_mount, "boot")
     if boot_src:
-        run_cmd(["sudo", "cp", "-r"] + [os.path.join(boot_src, i) for i in os.listdir(boot_src)] + [mount_efi])
+        for item in os.listdir(boot_src):
+            src = os.path.join(boot_src, item)
+            dst = os.path.join(mount_efi, item)
+            if os.path.isdir(src):
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src, dst)
         _status("Copied boot/ tree to EFI partition")
 
     for fname in ["bootmgr", "bootmgr.efi"]:
         src = _find_path_case_insensitive(iso_mount, fname)
         if src:
-            run_cmd(["sudo", "cp", src, f"{mount_efi}/{fname}"])
+            shutil.copy2(src, os.path.join(mount_efi, fname))
             _status(f"Copied {fname} to EFI partition root")
 
     _fix_efi_bootloader(mount_efi)
+
+
+def _mount_or_raise(source: str, target: str, fstype: str | None = None) -> None:
+    if not block_mount(source, target, fstype=fstype):
+        raise OSError(f"Failed to mount {source} on {target}")
+
+
+def _data_partition_fstype(scheme: PartitionScheme) -> str | None:
+    if scheme == PartitionScheme.SIMPLE_FAT32:
+        return "vfat"
+    if scheme == PartitionScheme.WINDOWS_EXFAT:
+        return "exfat"
+    return None
+
+
+def _verify_windows_media_copy(mount_data: str) -> None:
+    sources_dir = os.path.join(mount_data, "sources")
+    bootmgr = _find_path_case_insensitive(mount_data, "bootmgr") or _find_path_case_insensitive(
+        mount_data, "bootmgr.efi"
+    )
+    if not os.path.isdir(sources_dir) or not bootmgr:
+        raise OSError(f"Windows files were not copied to mounted target {mount_data}")
 
 
 def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=None, status_cb=None) -> bool:
@@ -333,7 +387,7 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
 
         # Step 2: Partition the drive
         _status(f"Wiping existing partition table on {device}...")
-        run_cmd(["sudo", "wipefs", "-a", device])
+        wipe_superblock(device)
         _status(f"Creating partitions on {device} with scheme {scheme.name}...")
         partitions = create_partitions(device, scheme)
         if not partitions:
@@ -345,7 +399,7 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
             _status("flash_windows: no data partition found after partitioning")
             return False
         _status(f"Partitions: EFI={efi_part}, data={data_part}")
-        run_cmd(["sudo", "udevadm", "settle"])
+        time.sleep(1)
         _emit(15)
 
         # Step 3: Format partitions
@@ -364,20 +418,26 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
 
         if efi_part and scheme in (PartitionScheme.WINDOWS_NTFS, PartitionScheme.WINDOWS_EXFAT):
             uefi_ntfs_img = find_uefi_ntfs_img(status_cb=_status)
-            run_cmd(["sudo", "dd", f"if={uefi_ntfs_img}", f"of={efi_part}", "bs=1M", "status=none"])
+            _status(f"Writing UEFI NTFS image to {efi_part}...")
+            write_device_image(uefi_ntfs_img, efi_part, bs=1048576)
         _emit(22)
 
         # Step 4: Mount targets and copy files
         with tempfile.TemporaryDirectory() as mount_data:
             mount_efi = None
-            if efi_part and scheme == PartitionScheme.SIMPLE_FAT32:
-                mount_efi = tempfile.mkdtemp()
-                run_cmd(["sudo", "mount", efi_part, mount_efi])
-
-            _status(f"Mounting {data_part} -> {mount_data}")
-            run_cmd(["sudo", "mount", data_part, mount_data])
+            data_mounted = False
+            efi_mounted = False
 
             try:
+                if efi_part and scheme == PartitionScheme.SIMPLE_FAT32:
+                    mount_efi = tempfile.mkdtemp()
+                    _mount_or_raise(efi_part, mount_efi, fstype="vfat")
+                    efi_mounted = True
+
+                _status(f"Mounting {data_part} -> {mount_data}")
+                _mount_or_raise(data_part, mount_data, fstype=_data_partition_fstype(scheme))
+                data_mounted = True
+
                 # Step 5: Copy ISO contents
                 extract_used = sum(
                     os.path.getsize(os.path.join(dp, f)) for dp, _, files in os.walk(iso_mount) for f in files
@@ -403,6 +463,7 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
                 else:
                     _copy_direct(iso_mount, mount_data, extract_used, _status, _emit)
 
+                _verify_windows_media_copy(mount_data)
                 _status(f"install.wim/esd on data partition: {wim_size / 1024**3:.2f} GiB")
 
                 # Step 6: Copy EFI boot files
@@ -410,9 +471,19 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
                     _copy_efi_boot_files(iso_mount, mount_efi, _status)
                 _emit(88)
 
-                # Step 7: Sync
+                # Step 7: Apply Windows tweaks while the target partition is still mounted.
+                if any(
+                    getattr(state, attr, 0) == 1 for attr in ("win_hardware_bypass", "win_microsoft_acc", "win_privacy")
+                ):
+                    _status("Applying selected Windows tweaks...")
+                    if apply_windows_tweaks(mount_data):
+                        _status("Windows tweaks applied")
+                    else:
+                        _status("WARNING: one or more Windows tweaks failed; see log for details")
+
+                # Step 8: Sync
                 _status("Syncing all writes to disk...")
-                run_cmd(["sudo", "sync"])
+                os.sync()
                 _emit(97)
                 _status("Sync complete")
 
@@ -422,10 +493,12 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
                 raise
             finally:
                 _status("Unmounting target partitions...")
+                if mount_efi and efi_mounted:
+                    block_umount(mount_efi)
                 if mount_efi:
-                    subprocess.run(["sudo", "umount", mount_efi], capture_output=True)
                     os.rmdir(mount_efi)
-                subprocess.run(["sudo", "umount", mount_data], capture_output=True)
+                if data_mounted:
+                    block_umount(mount_data)
                 _status("Unmount complete")
 
         _status("flash_windows: finished successfully, Windows USB is ready")
@@ -437,46 +510,62 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
         _status(f"flash_windows: failed: {e}")
         return False
     finally:
-        if iso_mount and os.path.ismount(iso_mount):
+        if iso_mount:
             _status(f"Unmounting ISO from {iso_mount}...")
-            subprocess.run(["sudo", "umount", iso_mount], capture_output=True)
+            block_umount_iso(iso_mount)
 
 
 # ---new---
 def mount_iso(iso_path: str) -> str | None:
-    """This function mounts an iso file at /mnt/iso/ and returns the location if mount is successfull
+    """Mount an ISO file at /mnt/iso/{name} using a loop device.
 
-    command:`sudo mount -o loop iso_path /mnt/iso/{iso name without extension}
+    Uses the pure-Python loop device helper from block_ops (no subprocess).
 
     Args:
-        iso_path (str): The location of the iso file
+        iso_path (str): Path to the ISO file.
 
     Returns:
-        str: the path where it's mounted
-        None: if mounting fails return None
+        str: The mount point path, or None on failure.
     """
     mount_base = "/mnt/iso"
     basename = os.path.basename(iso_path)
     iso_name_without_extension = os.path.splitext(basename)[0]
     iso_mount_location = os.path.join(mount_base, iso_name_without_extension)
 
-    try:
-        os.makedirs(iso_mount_location, exist_ok=True)
-        _status_print(f"Mounting {iso_path} in {iso_mount_location}")
-        result = subprocess.run(
-            ["sudo", "mount", "-o", "loop", iso_path, iso_mount_location], capture_output=True, text=True
-        )
-
-        if result.returncode == 0:
-            _status_print(f"Success: Mounted {iso_path} to {iso_mount_location} successfully!")
-            return iso_mount_location
-        else:
-            _status_print(f"Failed: Failed to mount {iso_path} to {iso_mount_location} successfully!")
-
-            return None
-    except Exception as e:
-        _status_print(f"An error occured during mounting iso: {e}")
+    _status_print(f"Mounting {iso_path} in {iso_mount_location}")
+    if block_mount_iso(iso_path, iso_mount_location):
+        _status_print(f"Success: Mounted {iso_path} to {iso_mount_location} successfully!")
+        return iso_mount_location
+    else:
+        _status_print(f"Failed: Failed to mount {iso_path} to {iso_mount_location} successfully!")
         return None
+
+
+def _partition_paths_for(drive: str, count: int) -> list[str]:
+    identifier = os.path.basename(drive)
+    separator = "p" if identifier[-1].isdigit() else ""
+    return [f"{drive}{separator}{idx}" for idx in range(1, count + 1)]
+
+
+def _wait_for_partition_nodes(drive: str, paths: list[str], timeout: float = 10.0) -> bool:
+    """Wait for the kernel/udev to expose newly written partition nodes."""
+    deadline = time.monotonic() + timeout
+    reread_next = time.monotonic()
+    missing = paths
+
+    while time.monotonic() < deadline:
+        missing = [path for path in paths if not os.path.exists(path)]
+        if not missing:
+            return True
+
+        now = time.monotonic()
+        if now >= reread_next:
+            reread_partitions(drive)
+            reread_next = now + 1.0
+        time.sleep(0.2)
+
+    log.error("Timed out waiting for partition nodes on %s: missing %s", drive, missing)
+    return False
 
 
 def create_partitions(drive: str, scheme: PartitionScheme) -> list[PartitionInfo]:
@@ -486,56 +575,49 @@ def create_partitions(drive: str, scheme: PartitionScheme) -> list[PartitionInfo
     """
 
     try:
-        total_sectors = _get_disk_size_sectors(drive)
+        total_sectors = get_sysfs_device_size_sectors(drive)
+        if total_sectors is None:
+            raise RuntimeError(f"Cannot get size for {drive}")
         sectors_per_mib = 1024 * 1024 // 512
-        efi_sectors = 2 * sectors_per_mib  # 2 MiB for EFI partition (more than enough for efi-ntfs)
+        efi_sectors = 2 * sectors_per_mib  # 2 MiB for EFI partition
         alignment = 2048  # sectors (1 MiB alignment, standard)
 
-        # data starts at sector 2048 (standard GPT start)
         data_start = alignment
-        data_end = total_sectors - efi_sectors - alignment  # leave room for EFI + alignment
+        data_end = total_sectors - efi_sectors - alignment
         data_size = data_end - data_start
-        # Define the sfdisk scripts for each enum case
-        scripts = {
-            PartitionScheme.WINDOWS_NTFS: (
-                f"start={data_start}, size={data_size}, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7\n"
-                f"size={efi_sectors}, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B\n"
-            ),
-            PartitionScheme.WINDOWS_EXFAT: (
-                f"start={data_start}, size={data_size}, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7\n"
-                f"size={efi_sectors}, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B\n"
-            ),
-            PartitionScheme.SIMPLE_FAT32: (f"start={data_start}, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7\n"),
-        }
 
-        script = scripts.get(scheme)
-        if not script:
+        # Build partition list for our native GPT writer
+        if scheme in (PartitionScheme.WINDOWS_NTFS, PartitionScheme.WINDOWS_EXFAT):
+            partitions_spec = [
+                {"role": "data", "start_lba": data_start, "size_lba": data_size, "name": "Windows Data"},
+                {"role": "efi", "start_lba": data_end + alignment, "size_lba": efi_sectors, "name": "EFI System"},
+            ]
+        elif scheme == PartitionScheme.SIMPLE_FAT32:
+            partitions_spec = [
+                {"role": "data", "start_lba": data_start, "name": "Windows Data"},
+            ]
+        else:
             raise ValueError(f"Invalid partition scheme: {scheme}")
 
-        # Apply the GPT table and script
-        subprocess.run(["sudo", "sfdisk", "--label", "gpt", drive], input=script, text=True, check=True)
+        wipe_superblock(drive, size_mb=1)
+        if not write_gpt(drive, partitions_spec):
+            raise RuntimeError(f"Failed to write GPT to {drive}")
 
-        # Refresh kernel table
-        subprocess.run(["sudo", "partprobe", drive], check=True)
-        time.sleep(0.5)
+        num_parts = len(partitions_spec)
+        partition_paths = _partition_paths_for(drive, num_parts)
 
-        # Build the return list
-        separator = "p" if drive[-1].isdigit() else ""
-        num_parts = len(script.strip().split("\n"))
+        reread_partitions(drive)
+        if not _wait_for_partition_nodes(drive, partition_paths):
+            raise RuntimeError(f"Partition nodes did not appear for {drive}: {partition_paths}")
 
         if num_parts > 1:
-            return [{"role": "data", "path": f"{drive}{separator}1"}, {"role": "efi", "path": f"{drive}{separator}2"}]
+            return [{"role": "data", "path": partition_paths[0]}, {"role": "efi", "path": partition_paths[1]}]
         else:
-            return [{"role": "data", "path": f"{drive}{separator}1"}]
+            return [{"role": "data", "path": partition_paths[0]}]
 
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         print(f"Error partitioning {drive}: {e}")
         return []
-
-
-def _get_disk_size_sectors(drive: str) -> int:
-    result = subprocess.run(["sudo", "blockdev", "--getsz", drive], capture_output=True, text=True, check=True)
-    return int(result.stdout.strip())  # returns 512-byte sectors
 
 
 UEFI_NTFS_URL = "https://github.com/pbatard/rufus/raw/master/res/uefi/uefi-ntfs.img"

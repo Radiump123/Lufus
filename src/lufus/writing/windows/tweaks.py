@@ -9,6 +9,8 @@ import html
 import re
 import subprocess
 import os
+import shutil
+import tempfile
 from lufus.utils import get_mount_and_drive
 from lufus import state
 from lufus.lufus_logging import get_logger
@@ -36,11 +38,54 @@ def _get_mount_and_drive():
     return get_mount_and_drive()
 
 
-def win_hardware_bypass():
+def _resolve_windows_mount(mount: str | None = None) -> str | None:
+    if mount:
+        return mount
     mount, _, _ = _get_mount_and_drive()
+    return mount
+
+
+def _boot_wim_path(mount: str) -> str:
+    return os.path.join(mount, "sources", "boot.wim")
+
+
+def _modify_boot_wim_registry(mount: str, hive: str, commands: list[str], label: str) -> bool:
+    boot_wim = _boot_wim_path(mount)
+    if not os.path.exists(boot_wim):
+        log.error("%s: boot.wim not found at %s", label, boot_wim)
+        return False
+
+    cmd_string = "\n".join(commands) + "\n"
+    temp_mount = tempfile.mkdtemp(prefix="lufus-winwim-")
+    mounted = False
+    try:
+        subprocess.run(["wimmountrw", boot_wim, "2", temp_mount], check=True)
+        mounted = True
+        subprocess.run(
+            ["chntpw", "e", os.path.join(temp_mount, "Windows", "System32", "config", hive)],
+            input=cmd_string,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(["wimunmount", temp_mount, "--commit"], check=True)
+        mounted = False
+        log.info("%s: boot.wim registry changes applied successfully.", label)
+        return True
+    except subprocess.CalledProcessError as e:
+        log.error("%s: command failed: %s", label, e.stderr or e)
+        return False
+    finally:
+        if mounted:
+            subprocess.run(["wimunmount", temp_mount, "--discard"], check=False)
+        shutil.rmtree(temp_mount, ignore_errors=True)
+
+
+def win_hardware_bypass(mount: str | None = None) -> bool:
+    mount = _resolve_windows_mount(mount)
     if not mount:
         log.error("win_hardware_bypass: no USB mount found")
-        return
+        return False
     commands = [
         "cd Setup",
         "newkey LabConfig",
@@ -51,55 +96,25 @@ def win_hardware_bypass():
         "save",
         "exit",
     ]
-    cmd_string = "\n".join(commands) + "\n"
     log.info("win_hardware_bypass: injecting registry keys into boot.wim at %s...", mount)
-    try:
-        subprocess.run(["mkdir", "/media/tempwinmnt"], check=True)
-        subprocess.run(["wimmountrw", f"{mount}/sources/boot.wim", "2", "/media/tempwinmnt"], check=True)
-        subprocess.run(
-            ["chntpw", "e", "/media/tempwinmnt/Windows/System32/config/SYSTEM"],
-            input=cmd_string,
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-        subprocess.run(["wimunmount", "/media/tempwinmnt", "--commit"], check=True)
-        subprocess.run(["rm", "-rf", "/media/tempwinmnt"], check=True)
-        log.info("win_hardware_bypass: registry keys injected successfully.")
-    except subprocess.CalledProcessError as e:
-        log.error("win_hardware_bypass: CalledProcessError: %s", e.stderr)
+    return _modify_boot_wim_registry(mount, "SYSTEM", commands, "win_hardware_bypass")
 
 
-def win_local_acc():
-    mount, _, _ = _get_mount_and_drive()
+def win_local_acc(mount: str | None = None) -> bool:
+    mount = _resolve_windows_mount(mount)
     if not mount:
         log.error("win_local_acc: no USB mount found")
-        return
-    commands = ["cd Microsoft\\Windows\\CurrentVersion\\OOBE\naddvalue BypassNRO 4 1\nsave\nexit\n"]
-    cmd_string = "\n".join(commands) + "\n"
+        return False
+    commands = ["cd Microsoft\\Windows\\CurrentVersion\\OOBE", "addvalue BypassNRO 4 1", "save", "exit"]
     log.info("win_local_acc: bypassing online account requirement at %s...", mount)
-    try:
-        subprocess.run(["mkdir", "/media/tempwinmnt"], check=True)
-        subprocess.run(["wimmountrw", f"{mount}/sources/boot.wim", "2", "/media/tempwinmnt"], check=True)
-        subprocess.run(
-            ["chntpw", "e", "/media/tempwinmnt/Windows/System32/config/SOFTWARE"],
-            input=cmd_string,
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-        subprocess.run(["wimunmount", "/media/tempwinmnt", "--commit"], check=True)
-        subprocess.run(["rm", "-rf", "/media/tempwinmnt"], check=True)
-        log.info("win_local_acc: online account bypass applied successfully.")
-    except subprocess.CalledProcessError as e:
-        log.error("win_local_acc: CalledProcessError: %s", e.stderr)
+    return _modify_boot_wim_registry(mount, "SOFTWARE", commands, "win_local_acc")
 
 
-def win_skip_privacy_questions():
-    mount, _, _ = _get_mount_and_drive()
+def win_skip_privacy_questions(mount: str | None = None) -> bool:
+    mount = _resolve_windows_mount(mount)
     if not mount:
         log.error("win_skip_privacy_questions: no USB mount found")
-        return
+        return False
     xml_content = """<?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend">
     <settings pass="oobeSystem">
@@ -118,17 +133,18 @@ def win_skip_privacy_questions():
     with open(xml_path, "w") as f:
         f.write(xml_content)
     log.info("win_skip_privacy_questions: autounattend.xml created to skip privacy screens.")
+    return True
 
 
-def win_local_acc_name():
-    mount, _, _ = _get_mount_and_drive()
+def win_local_acc_name(mount: str | None = None) -> bool:
+    mount = _resolve_windows_mount(mount)
     if not mount:
         log.error("win_local_acc_name: no USB mount found")
-        return
+        return False
     user_name = _validate_windows_username(state.win_local_acc)
     if user_name is None:
         log.error("win_local_acc_name: invalid username %r, aborting", state.win_local_acc)
-        return
+        return False
     # html.escape converts < > & " ' so the value is safe to embed in XML.
     safe_name = html.escape(user_name, quote=True)
     xml_template = f"""<?xml version="1.0" encoding="utf-8"?>
@@ -163,3 +179,19 @@ def win_local_acc_name():
         "win_local_acc_name: autounattend.xml created — privacy screens skipped, local account %r created.",
         user_name,
     )
+    return True
+
+
+def apply_windows_tweaks(mount: str) -> bool:
+    """Apply selected Windows tweaks to an already-mounted install media root."""
+    ok = True
+    if getattr(state, "win_hardware_bypass", 0) == 1:
+        ok = win_hardware_bypass(mount) and ok
+    if getattr(state, "win_microsoft_acc", 0) == 1:
+        if getattr(state, "win_local_acc_chk", 0) == 1:
+            ok = win_local_acc_name(mount) and ok
+        else:
+            ok = win_local_acc(mount) and ok
+    if getattr(state, "win_privacy", 0) == 1:
+        ok = win_skip_privacy_questions(mount) and ok
+    return ok

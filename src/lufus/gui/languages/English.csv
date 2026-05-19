@@ -90,7 +90,7 @@ dlg_select_image_title,Select Disk Image
 dlg_select_image_filter,Disk Images (*.iso *.dmg *.img *.bin *.raw);;All Files (*)
 about_content,"Lufus is a disk image writer written in Python for Linux.
 Inspired by the original Rufus tool for Windows.
-GitHub: github.com/hog185/lufus"
+GitHub: https://github.com/Hogjects/Lufus"
 about_subtitle,USB Flash Tool
 btn_close,Close
 btn_ok,OK
@@ -136,3 +136,7 @@ acc_website,Open Lufus website
 acc_about,About Lufus
 acc_settings,Open settings
 acc_log,Open log window
+btn_discord,Join Discord Server
+btn_github,Open GitHub Repo
+msgbox_flash_warning_title,WARNING: ALL DATA ON DEVICE WILL BE DESTROYED!
+msgbox_flash_warning_body,"To continue with this operation, click OK. To quit click CANCEL."

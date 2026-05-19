@@ -10,6 +10,13 @@ import time
 import urllib.request
 import urllib.error
 import glob
+from lufus.block_ops import (
+    mount as block_mount,
+    umount as block_umount,
+    write_gpt,
+    wipe_superblock,
+    reread_partitions,
+)
 
 """
    This script installs grub in a way that lets users to copy distro iso to the usb device and
@@ -131,23 +138,12 @@ def install_grub(target_device: str) -> bool:
     # Cleanup to avoid "Device Busy"
     print(f"--- Cleaning up {target_device} ---")
     for partition in glob.glob(f"{target_device}*"):
-        subprocess.run(["umount", partition], check=False)
+        block_umount(partition)
 
     # Partition separator: NVMe and MMC block devices use 'p' between the
     # disk name and the partition number (e.g. /dev/nvme0n1p1, /dev/mmcblk0p1).
     # Standard SCSI/SATA/USB drives use no separator (e.g. /dev/sdb1).
     sep = "p" if re.search(r"(nvme\d+n\d+|mmcblk\d+)$", target_device) else ""
-
-    # Partitioning Definition
-    sfdisk_input = f"""
-label: gpt
-device: {target_device}
-unit: sectors
-
-{target_device}{sep}1 : start=2048, size=2048, type=21686148-6449-6E6F-7444-6961676F6E61
-{target_device}{sep}2 : start=4096, size=204800, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B
-{target_device}{sep}3 : start=208896, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
-    """
 
     # Use unique temp dirs instead of hardcoded /tmp paths to avoid stale-mount collisions.
     efi_mount = tempfile.mkdtemp(prefix="lufus_efi_")
@@ -157,14 +153,23 @@ unit: sectors
 
     try:
         print(f"--- Partitioning {target_device} ---")
-        subprocess.run(["sfdisk", target_device], input=sfdisk_input.encode(), check=True)
+        wipe_superblock(target_device, size_mb=1)
+        partitions_spec = [
+            {"role": "bios", "start_lba": 2048, "size_lba": 2048, "name": "BIOS Boot"},
+            {"role": "efi", "start_lba": 4096, "size_lba": 204800, "name": "EFI System"},
+            {"role": "data", "start_lba": 208896, "name": "OS Data"},
+        ]
+        from lufus.block_ops import write_gpt
 
-        # Refresh kernel table
-        subprocess.run(["partprobe", target_device], check=False)
-        subprocess.run(["udevadm", "settle"], check=False)
-        subprocess.run(["sync"], check=True)
+        disk_guid = os.urandom(16)
+        if not write_gpt(target_device, partitions_spec):
+            raise RuntimeError(f"Failed to write GPT to {target_device}")
 
-        # Wait for device nodes to be created by udev
+        reread_partitions(target_device)
+        os.sync()
+        time.sleep(1)
+
+        # Wait for device nodes to be created
         efi_part = f"{target_device}{sep}2"
         data_part = f"{target_device}{sep}3"
         for _ in range(10):
@@ -180,7 +185,7 @@ unit: sectors
         subprocess.run(["mkfs.exfat", "-L", "OS_PART", data_part], check=True)
 
         # GRUB Installation
-        subprocess.run(["mount", efi_part, efi_mount], check=True)
+        block_mount(efi_part, efi_mount, fstype="vfat")
         efi_mounted = True
 
         print("--- Installing GRUB (Legacy + UEFI) ---")
@@ -203,11 +208,11 @@ unit: sectors
         cfg_path = os.path.join(script_dir, "grub.cfg")
         if not os.path.exists(cfg_path):
             print("ERROR: grub.cfg not found next to the script.")
-            return False  # finally block will unmount because efi_mounted=True
+            return False
         shutil.copy(cfg_path, f"{efi_mount}/boot/grub/grub.cfg")
 
         # Download wimboot
-        subprocess.run(["mount", data_part, data_mount], check=True)
+        block_mount(data_part, data_mount, fstype="exfat")
         data_mounted = True
         download_wimboot(f"{data_mount}/wimboot")
 
@@ -219,15 +224,14 @@ unit: sectors
         return False
     finally:
         if efi_mounted:
-            subprocess.run(["umount", efi_mount], check=False)
+            block_umount(efi_mount)
         if data_mounted:
-            subprocess.run(["umount", data_mount], check=False)
-        # Clean up temp dirs regardless of outcome
+            block_umount(data_mount)
         for d in (efi_mount, data_mount):
             try:
                 os.rmdir(d)
             except OSError:
-                pass  # directory may be non-empty if unmount failed; ignore
+                pass
 
 
 # this part is for testing the script

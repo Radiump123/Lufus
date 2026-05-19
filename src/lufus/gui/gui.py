@@ -1,4 +1,3 @@
-import subprocess
 import sys
 import tempfile
 import json
@@ -17,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QMainWindow,
     QWidget,
     QVBoxLayout,
@@ -44,6 +44,7 @@ from PySide6.QtGui import QIcon
 
 from lufus import state
 from lufus import state as states
+from lufus.block_ops import get_device_size
 from lufus.drives.autodetect_usb import UsbMonitor
 from lufus.lufus_logging import get_logger
 from lufus.gui.themes.icon_utils import svg_icon
@@ -53,7 +54,6 @@ from lufus.gui.i18n import load_translations
 from lufus.gui.redirector import StdoutRedirector
 from lufus.gui.dialogs import LogWindow, AboutWindow, SettingsDialog, WinTweaks
 from lufus.gui.workers import FlashWorker, VerifyWorker
-from lufus.writing.windows.tweaks import *
 
 # log level mapping for colors and methods
 _LOG_LEVELS = {
@@ -64,6 +64,123 @@ _LOG_LEVELS = {
     "ERROR": ("error", "#e05555"),
     "CRITICAL": ("critical", "#e05555"),
 }
+
+
+from lufus.browse_freely import open_url_non_root
+
+
+def _processes_using_device(device_node: str) -> list[int]:
+    """Return PIDs of processes holding *device_node* open, by scanning /proc."""
+    pids = []
+    device_real = os.path.realpath(device_node) if os.path.exists(device_node) else device_node
+    try:
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            pid = entry
+            fd_dir = f"/proc/{pid}/fd"
+            try:
+                for fd_entry in os.listdir(fd_dir):
+                    try:
+                        link = os.readlink(f"{fd_dir}/{fd_entry}")
+                        if link == device_real or link == device_node:
+                            pids.append(int(pid))
+                            break
+                    except (OSError, ValueError):
+                        pass
+            except PermissionError:
+                continue
+    except Exception:
+        pass
+    return pids
+
+
+def _kill_processes_using_device(device_node: str) -> int:
+    """Kill all processes using *device_node* and return the count killed."""
+    pids = _processes_using_device(device_node)
+    for pid in pids:
+        try:
+            os.kill(pid, 9)  # SIGKILL
+        except OSError:
+            pass
+    return len(pids)
+
+
+# Sane terminal settings captured at startup (used by _reset_terminal).
+_SANE_TERMIOS: "tuple | None" = None
+
+
+def _capture_sane_termios() -> None:
+    """Capture current terminal settings as the 'sane' baseline."""
+    global _SANE_TERMIOS
+    try:
+        import termios
+
+        fd = sys.stdin.fileno()
+        if os.isatty(fd):
+            _SANE_TERMIOS = termios.tcgetattr(fd)
+    except Exception:
+        pass
+
+
+def _reset_terminal() -> None:
+    """Reset terminal to sane settings (replaces stty sane).
+
+    No-ops safely when stdin is not a TTY.
+    """
+    import termios
+
+    try:
+        fd = sys.stdin.fileno()
+    except ValueError:
+        return
+    if not os.isatty(fd):
+        return
+    if _SANE_TERMIOS is not None:
+        termios.tcsetattr(fd, termios.TCSANOW, _SANE_TERMIOS)
+    else:
+        # Fallback: explicitly set canonical mode + echo
+        settings = termios.tcgetattr(fd)
+        settings[3] = settings[3] | (termios.ECHO | termios.ICANON)
+        termios.tcsetattr(fd, termios.TCSANOW, settings)
+
+
+def _process_name_matches(name_fragment: str) -> bool:
+    """Return True if any running process cmdline contains *name_fragment*."""
+    try:
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                cmdline = Path(f"/proc/{entry}/cmdline").read_bytes()
+                if name_fragment.encode() in cmdline:
+                    return True
+            except (OSError, PermissionError):
+                continue
+    except Exception:
+        pass
+    return False
+
+
+def _get_downloads_dir() -> Path:
+    """Return the user's Downloads directory using XDG config or HOME default.
+
+    Pure Python replacement for ``xdg-user-dir DOWNLOAD``.
+    """
+    try:
+        user_dirs = Path.home() / ".config" / "user-dirs.dirs"
+        if user_dirs.is_file():
+            for line in user_dirs.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line.startswith("XDG_DOWNLOAD_DIR="):
+                    val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    val = val.replace("$HOME", str(Path.home()))
+                    p = Path(val)
+                    if p.is_dir():
+                        return p
+    except Exception:
+        pass
+    return Path.home() / "Downloads"
 
 
 class BackgroundWidget(QWidget):
@@ -103,6 +220,7 @@ class BackgroundWidget(QWidget):
 class LufusWindow(QMainWindow):
     def __init__(self, usb_devices=None, scale: Scale = None):
         super().__init__()
+        _capture_sane_termios()
         # main window initialization :3
         self._logger = get_logger("gui")
 
@@ -115,19 +233,6 @@ class LufusWindow(QMainWindow):
         # load translations :D
         self.current_language = state.language
         self._T = load_translations(self.current_language)
-
-        # restore theme from env when relaunched as root via pkexec :3
-        env_theme = os.environ.get("LUFUS_THEME", "")
-        if env_theme:
-            state.theme = env_theme
-
-        # load persisted theme from config when not set via env :3
-        if not getattr(state, "theme", ""):
-            try:
-                _theme_cfg = Path(user_config_dir("Lufus")) / "active_theme"
-                state.theme = _theme_cfg.read_text(encoding="utf-8").strip()
-            except Exception:
-                pass
 
         self.setWindowTitle(self._T.get("window_title", "lufus"))
 
@@ -201,15 +306,7 @@ class LufusWindow(QMainWindow):
     def _check_latest_download(self):
         if state.iso_path:
             return
-        try:
-            result = subprocess.run(["xdg-user-dir", "DOWNLOAD"], capture_output=True, text=True, timeout=2)
-            downloads = (
-                Path(result.stdout.strip())
-                if result.returncode == 0 and result.stdout.strip()
-                else Path.home() / "Downloads"
-            )
-        except Exception:
-            downloads = Path.home() / "Downloads"
+        downloads = _get_downloads_dir()
         if not downloads.is_dir():
             return
         try:
@@ -923,29 +1020,8 @@ class LufusWindow(QMainWindow):
 
     def _open_url(self):
         # open github url in browser :D
-        url = "https://github.com/Hog185/Lufus"
-        pkexec_uid = os.environ.get("PKEXEC_UID")
-        if pkexec_uid and os.geteuid() == 0:
-            # when running as root via pkexec open as original user :3
-            try:
-                import pwd
-
-                user_info = pwd.getpwuid(int(pkexec_uid))
-                subprocess.Popen(
-                    ["runuser", "-u", user_info.pw_name, "--", "xdg-open", url],
-                    env={
-                        "DISPLAY": os.environ.get("DISPLAY", ":0"),
-                        "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY", ""),
-                        "XDG_RUNTIME_DIR": f"/run/user/{pkexec_uid}",
-                        "HOME": user_info.pw_dir,
-                        "PATH": "/usr/bin:/bin",
-                    },
-                )
-                return
-            except Exception as e:
-                self.log_message(f"Failed to open URL as user: {e}", level="WARN")
-        # fallback to normal browser open :D
-        webbrowser.open(url)
+        url = "https://github.com/Hogjects/Lufus"
+        open_url_non_root(url)
 
     def update_new_label(self, current_text):
         # update volume label in states :3
@@ -988,7 +1064,8 @@ class LufusWindow(QMainWindow):
 
     def update_check_bad(self):
         # update bad blocks check setting and enable pass selector :3
-        state.check_bad = 0 if self.chk_badblocks.isChecked() else 1
+        state.check_bad = self.chk_badblocks.isChecked()
+        state.bad_blocks_passes = self.combo_badblocks.currentIndex() + 1
         show = self.chk_badblocks.isChecked()
         self.combo_badblocks.setEnabled(show)
         self._animate_widget(self.combo_badblocks, show, "_anim_badblocks")
@@ -1243,6 +1320,12 @@ class LufusWindow(QMainWindow):
         self._T = load_translations(language)
         self._update_ui_text()
         self.log_message(f"Language changed to: {language}")
+        try:
+            _lang_cfg = Path(user_config_dir("Lufus")) / "active_language"
+            _lang_cfg.parent.mkdir(parents=True, exist_ok=True)
+            _lang_cfg.write_text(language, encoding="utf-8")
+        except Exception as e:
+            self.log_message(f"Failed to persist language setting: {e}", level="WARN")
 
     def _update_ui_text(self):
         # update all text labels with new translations :3
@@ -1343,11 +1426,11 @@ class LufusWindow(QMainWindow):
 
             try:
                 # check what processes are using device :3
-                lsof = subprocess.run(["lsof", device_node], capture_output=True, text=True)
-                if lsof.returncode == 0:
-                    self.log_message(f"Processes using {device_node} before kill:\n{lsof.stdout}")
+                procs = _processes_using_device(device_node)
+                if procs:
+                    self.log_message(f"Processes using {device_node}: {procs}")
             except Exception as e:
-                self.log_message(f"Could not run lsof: {e}")
+                self.log_message(f"Could not check device usage: {e}")
 
             if self.flash_worker and self.flash_worker.isRunning():
                 # terminate flash worker thread :D
@@ -1360,10 +1443,13 @@ class LufusWindow(QMainWindow):
 
             try:
                 # kill processes using device :3
-                subprocess.run(["fuser", "-k", device_node], timeout=5, check=False)
-                self.log_message("fuser -k executed")
+                killed = _kill_processes_using_device(device_node)
+                if killed:
+                    self.log_message(f"Killed {killed} process(es) using {device_node}")
+                else:
+                    self.log_message("No processes using device found to kill")
             except Exception as e:
-                self.log_message(f"fuser fallback failed: {e}")
+                self.log_message(f"Failed to kill processes: {e}")
 
             if hasattr(self, "verify_worker") and self.verify_worker and self.verify_worker.isRunning():
                 # terminate verify worker :D
@@ -1375,7 +1461,7 @@ class LufusWindow(QMainWindow):
             if self.is_terminal:
                 # reset terminal state :3
                 try:
-                    subprocess.run(["stty", "sane"], timeout=1, check=False)
+                    _reset_terminal()
                     self.log_message("Terminal reset to sane state")
                 except Exception as e:
                     self.log_message(f"Failed to reset terminal: {e}")
@@ -1451,18 +1537,23 @@ class LufusWindow(QMainWindow):
             self.verify_worker.start()
         else:
             # skip verification and start flash :3
-            if states.image_option == 0 and states.currentflash == 0:
+            if state.image_option == 0 and state.flash_mode == 0:
                 dlg = WinTweaks(self)
-                if dlg.exec() == QDialog.DialogCode.Rejected:
+                result = dlg.exec()
+                self.log_message(f"WinTweaks dialog closed with result: {result}")
+                if result == QDialog.DialogCode.Rejected:
+                    self.log_message("Flash cancelled in WinTweaks dialog", level="WARN")
                     return
+            self.log_message("Proceeding to perform_flash")
             self.perform_flash()
 
     def on_verify_finished(self, success: bool):
         # handle verification result :D
         if success:
             self.log_message("SHA256 verification successful, proceeding to flash")
+            self.progress_bar.setFormat("")
             self._clear_speed_eta()
-            if states.image_option == 0 and states.currentflash == 0:
+            if state.image_option == 0 and state.flash_mode == 0:
                 dlg = WinTweaks(self)
                 if dlg.exec() == QDialog.DialogCode.Rejected:
                     self.btn_start.setEnabled(True)
@@ -1486,6 +1577,36 @@ class LufusWindow(QMainWindow):
             self._clear_speed_eta()
 
     def perform_flash(self):
+        # Rufus-style warning before flashing :3
+        self.log_message("perform_flash: showing confirmation dialog")
+        device_name = self.combo_device.currentText()
+        warning_title = self._T.get("msgbox_flash_warning_title", "WARNING: ALL DATA ON DEVICE WILL BE DESTROYED!")
+        warning_body = self._T.get(
+            "msgbox_flash_warning_body",
+            "To continue with this operation, click OK. To quit click CANCEL.",
+        )
+
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setWindowTitle(warning_title)
+        msg.setText(f"{warning_title}\n({device_name})\n\n{warning_body}")
+
+        ok_btn = msg.addButton(self._T.get("btn_ok", "OK"), QMessageBox.ButtonRole.AcceptRole)
+        cancel_btn = msg.addButton(self._T.get("btn_cancel", "Cancel"), QMessageBox.ButtonRole.RejectRole)
+        msg.setDefaultButton(cancel_btn)
+
+        msg.exec()
+        reply_btn = msg.clickedButton()
+
+        if reply_btn == cancel_btn:
+            self.log_message("Flash aborted by user at warning prompt", level="WARN")
+            self.btn_start.setEnabled(True)
+            self.btn_cancel.setEnabled(False)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setFormat("")
+            self._clear_speed_eta()
+            return
+
         # perform actual flash operation :D
         options = {
             "iso_path": state.iso_path,
@@ -1499,6 +1620,7 @@ class LufusWindow(QMainWindow):
             "quick_format": state.quick_format,
             "create_extended": state.create_extended,
             "check_bad": state.check_bad,
+            "bad_blocks_passes": state.bad_blocks_passes,
             "new_label": state.new_label,
             "verify_hash": state.verify_hash,
             "expected_hash": state.expected_hash,
@@ -1582,18 +1704,7 @@ class LufusWindow(QMainWindow):
             # flash succeeded :D
             self.progress_bar.setValue(100)
             self.progress_bar.setFormat(self._T.get("progress_complete", "Complete"))
-            # change from fo to tweaks
             self.log_message("Flash operation finished with result: SUCCESS")
-            if states.image_option == 0 and states.currentflash == 0:
-                if getattr(states, "win_hardware_bypass", 0) == 1:
-                    win_hardware_bypass()
-                if getattr(states, "win_microsoft_acc", 0) == 1:
-                    if getattr(states, "win_local_acc_chk", 0) == 1:
-                        win_local_acc_name()
-                    else:
-                        win_local_acc()
-                if getattr(states, "win_privacy", 0) == 1:
-                    win_skip_privacy_questions()
             QMessageBox.information(
                 self,
                 self._T.get("msgbox_success_title", "Success"),
@@ -1726,7 +1837,6 @@ class LufusWindow(QMainWindow):
         # check if a polkit authentication agent is running :3
         # returns true if found false otherwise
         try:
-            # common agent process names :D
             agents = [
                 "polkit-gnome-authentication-agent-1",
                 "polkit-kde-authentication-agent-1",
@@ -1734,18 +1844,15 @@ class LufusWindow(QMainWindow):
                 "mate-polkit",
                 "polkit-1-agent",
             ]
-            # use pgrep to search for any of these :3
             for agent in agents:
-                result = subprocess.run(["pgrep", "-f", agent], capture_output=True)
-                if result.returncode == 0:
+                if _process_name_matches(agent):
                     return True
             return False
         except Exception:
-            # if pgrep fails assume agent might be present better to try :D
             return True
 
     def get_latest_release(self):
-        owner = "Hog185"
+        owner = "Hogjects"
         repo = "Lufus"
         url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
         current_version = state.version
@@ -1801,7 +1908,7 @@ class LufusWindow(QMainWindow):
         newupdate.exec()
         if newupdate.clickedButton() == download_btn:
             self.log_message(f"New update download button clicked", level="DEBUG")
-            webbrowser.open("https://github.com/Hog185/Lufus/releases")
+            open_url_non_root("https://github.com/Hogjects/Lufus/releases")
         else:
             self.log_message(f"download later button clicked", level="DEBUG")
 

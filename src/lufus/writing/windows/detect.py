@@ -15,10 +15,10 @@ the file listing is only fetched once.
 """
 
 import re
-import subprocess
 from enum import Enum
 
 from lufus.lufus_logging import get_logger
+from lufus.iso9660 import has_any_file, list_files
 
 log = get_logger(__name__)
 
@@ -95,70 +95,17 @@ def _label_is_windows(label: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# File-listing helpers — 7z first, isoinfo as fallback
+# File-listing helpers — pure Python ISO 9660 reader
 # ---------------------------------------------------------------------------
 
 
-def _list_with_7z(iso_path: str) -> "str | None":
-    """Return the lowercased 7z file listing, or None on failure / not installed."""
-    try:
-        r = subprocess.run(
-            ["7z", "l", iso_path],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if r.returncode == 0:
-            return r.stdout.lower()
-        log.warning("detect: 7z exited %d — %s", r.returncode, r.stderr.strip()[:200])
-    except FileNotFoundError:
-        log.info("detect: 7z not found, trying isoinfo")
-    except subprocess.TimeoutExpired:
-        log.warning("detect: 7z timed out on %s", iso_path)
-    except Exception as e:
-        log.warning("detect: 7z error: %s", e)
-    return None
-
-
-def _list_with_isoinfo(iso_path: str) -> "str | None":
-    """Return a normalised isoinfo file listing, or None on failure / not installed.
-
-    isoinfo outputs uppercase ISO 9660 names with version suffixes (;1).
-    We normalise to lowercase forward-slash paths with suffixes stripped so
-    the same marker strings work for both 7z and isoinfo output.
-    """
-    try:
-        # -R uses Rock Ridge extensions (lowercase real names on Linux ISOs).
-        # If the ISO has no RR, isoinfo falls back to ISO 9660 names gracefully.
-        r = subprocess.run(
-            ["isoinfo", "-f", "-R", "-i", iso_path],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if r.returncode == 0:
-            lines = []
-            for line in r.stdout.splitlines():
-                line = line.strip().lstrip("/").lower()
-                line = re.sub(r";[0-9]+$", "", line)  # strip ;1 version suffix
-                lines.append(line)
-            return "\n".join(lines)
-        log.warning("detect: isoinfo exited %d", r.returncode)
-    except FileNotFoundError:
-        log.info("detect: isoinfo not found either — detection limited to PVD label")
-    except subprocess.TimeoutExpired:
-        log.warning("detect: isoinfo timed out on %s", iso_path)
-    except Exception as e:
-        log.warning("detect: isoinfo error: %s", e)
-    return None
-
-
-def _get_file_listing(iso_path: str) -> "str | None":
-    """Try 7z then isoinfo; return a normalised lowercased listing, or None."""
-    listing = _list_with_7z(iso_path)
-    if listing is None:
-        listing = _list_with_isoinfo(iso_path)
-    return listing
+def _get_file_listing(iso_path: str) -> "list[str] | None":
+    """Return a normalised lowercased file listing via pure Python ISO 9660 reader,
+    or None if the file cannot be read / is not ISO 9660."""
+    files = list_files(iso_path)
+    if files is None:
+        log.info("detect: pure Python ISO reader could not read %s", iso_path)
+    return files
 
 
 # ---------------------------------------------------------------------------
@@ -246,13 +193,13 @@ _LINUX_FILE_MARKERS = [
 
 
 def detect_iso_type(iso_path: str) -> IsoType:
-    """Detect the OS family of an ISO image.
+    """Detect the OS family of an ISO image using pure Python.
 
     Returns IsoType.WINDOWS, IsoType.LINUX, or IsoType.OTHER.
 
-    The file listing subprocess (7z / isoinfo) is invoked at most once
-    regardless of how many OS families are checked — much faster than calling
-    is_windows_iso() and is_linux_iso() back-to-back.
+    Step 1 reads the ISO 9660 PVD label (instant, no subprocess).
+    Step 2 walks the ISO 9660 directory tree (pure Python) to find
+    OS-specific marker files.
     """
     log.info("ISO detection: checking %s", iso_path)
 
@@ -271,28 +218,24 @@ def detect_iso_type(iso_path: str) -> IsoType:
             return IsoType.LINUX
 
     # ------------------------------------------------------------------
-    # Step 2 — File listing (7z preferred, isoinfo as fallback)
+    # Step 2 — File listing (pure Python ISO 9660 reader)
     # ------------------------------------------------------------------
     listing = _get_file_listing(iso_path)
 
     if listing is None:
-        # Neither tool is available — label-only detection had no match either.
-        log.warning(
-            "ISO detection: no file listing tool available — "
-            "install p7zip-full or genisoimage for better accuracy. "
-            "Defaulting to Other."
-        )
+        log.warning("ISO detection: could not read ISO directory — defaulting to Other.")
         return IsoType.OTHER
 
-    # Windows markers first — extremely specific, near-zero false-positive rate
+    # Windows markers first
+    lower_listing = [f.lower() for f in listing]
     for marker in _WIN_FILE_MARKERS:
-        if marker in listing:
+        if marker.lower() in lower_listing:
             log.info("ISO detection: found Windows marker %r -> Windows", marker)
             return IsoType.WINDOWS
 
-    # Linux markers second — all verified non-overlapping with Windows
+    # Linux markers second
     for marker in _LINUX_FILE_MARKERS:
-        if marker in listing:
+        if marker.lower() in lower_listing:
             log.info("ISO detection: found Linux marker %r -> Linux", marker)
             return IsoType.LINUX
 

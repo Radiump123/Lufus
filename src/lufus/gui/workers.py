@@ -35,8 +35,9 @@ class VerifyWorker(QThread):
                 for chunk in iter(lambda: f.read(1024 * 1024), b""):
                     sha256.update(chunk)
                     bytes_read += len(chunk)
-                    pct = min(int(bytes_read * 100 / file_size), 99) if file_size > 0 else 0
+                    pct = int(bytes_read * 100 / file_size) if file_size > 0 else 0
                     self.int_progress.emit(pct)
+            self.int_progress.emit(100)
             calculated = sha256.hexdigest()
             if calculated != normalized:
                 self.progress.emit(f"SHA256 mismatch: expected {normalized}, got {calculated}")
@@ -93,6 +94,31 @@ class FlashWorker(QThread):
                     self.status.emit(self._T.get("status_unmounting", "Unmounting {part}...").format(part=part))
                     fo.unmount(part)
                     unmounted_parts.append(part)
+
+            # bad blocks check :D
+            if getattr(states, "check_bad", False):
+                self.status.emit(
+                    self._T.get("status_badblocks_starting", "Checking for bad blocks (this may take a while)...")
+                )
+                self.progress.emit(5)
+                bad_passes = getattr(states, "bad_blocks_passes", 1)
+                bad_ok = fo.check_device_bad_blocks(passes=bad_passes)
+                if not bad_ok:
+                    self.status.emit(
+                        self._T.get(
+                            "status_badblocks_failed",
+                            "Bad block check FAILED. Drive may be damaged.",
+                        )
+                    )
+                    self.flash_done.emit(False)
+                    return
+                self.status.emit(
+                    self._T.get("status_badblocks_passed", "Bad block check passed (no bad blocks found).")
+                )
+
+            # Re-unmount in case auto-mount happened during badblocks check
+            for part in glob.glob(f"{device_node}[0-9]*"):
+                fo.unmount(part)
 
             # perform operation based on image option
             if image_option == 3:  # Format Only

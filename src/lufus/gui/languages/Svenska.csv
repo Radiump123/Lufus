@@ -90,7 +90,7 @@ dlg_select_image_title,Välj enhetsavbildning
 dlg_select_image_filter,Enhetsavbildningar (*.iso *.dmg *.img *.bin *.raw);;Alla filer (*)
 about_content,"Lufus är ett verktyg för att skriva diskavbildningar, skrivet i Python för Linux.
 Inspirerat av det ursprungliga Rufus-verktyget för Windows.
-GitHub: github.com/hog185/lufus"
+GitHub: https://github.com/Hogjects/Lufus"
 about_subtitle,USB-skrivningsverktyg
 btn_close,Stäng
 btn_ok,OK
@@ -136,3 +136,7 @@ acc_website,Öppna Lufus webbplats
 acc_about,Om Lufus
 acc_settings,Öppna inställningar
 acc_log,Öppna loggfönster
+btn_discord,Gå med i Discord-servern
+btn_github,Öppna GitHub-repo
+msgbox_flash_warning_title,VARNING: ALLA DATA PÅ ENHETEN KOMMER ATT FÖRSTÖRAS!
+msgbox_flash_warning_body,"För att fortsätta med denna åtgärd, klicka på OK. För att avsluta, klicka på AVBRYT."

@@ -145,34 +145,45 @@ def test_cluster_respects_cluster_size_state(monkeypatch) -> None:
 
 def test_apply_partition_scheme_gpt(monkeypatch) -> None:
     calls = []
-    monkeypatch.setattr(formatting.subprocess, "run", lambda cmd, check=True, **kw: calls.append(cmd))
+    monkeypatch.setattr(
+        formatting,
+        "write_single_partition_table",
+        lambda dev, scheme="gpt": calls.append((dev, scheme)) or True,
+    )
     monkeypatch.setattr(formatting.state, "partition_scheme", 0)
 
     formatting._apply_partition_scheme("/dev/sdb1")
 
-    assert any("gpt" in c for c in calls)
+    assert any(scheme == "gpt" for _, scheme in calls)
 
 
 def test_apply_partition_scheme_mbr(monkeypatch) -> None:
     calls = []
-    monkeypatch.setattr(formatting.subprocess, "run", lambda cmd, check=True, **kw: calls.append(cmd))
+    monkeypatch.setattr(
+        formatting,
+        "write_single_partition_table",
+        lambda dev, scheme="gpt": calls.append((dev, scheme)) or True,
+    )
     monkeypatch.setattr(formatting.state, "partition_scheme", 1)
 
     formatting._apply_partition_scheme("/dev/sdb1")
 
-    assert any("msdos" in c for c in calls)
+    assert any(scheme == "mbr" for _, scheme in calls)
 
 
 def test_apply_partition_scheme_uses_raw_device_for_nvme(monkeypatch) -> None:
     """_apply_partition_scheme must use /dev/nvme0n1, not /dev/nvme0n."""
     calls = []
-    monkeypatch.setattr(formatting.subprocess, "run", lambda cmd, check=True, **kw: calls.append(cmd))
+    monkeypatch.setattr(
+        formatting,
+        "write_single_partition_table",
+        lambda dev, scheme="gpt": calls.append((dev, scheme)) or True,
+    )
     monkeypatch.setattr(formatting.state, "partition_scheme", 0)
 
     formatting._apply_partition_scheme("/dev/nvme0n1p1")
 
-    raw_devices_used = [c[2] for c in calls if len(c) > 2]
-    assert all(d == "/dev/nvme0n1" for d in raw_devices_used), f"Expected /dev/nvme0n1 but got: {raw_devices_used}"
+    assert all(d == "/dev/nvme0n1" for d, _ in calls), f"Expected /dev/nvme0n1 but got: {[d for d, _ in calls]}"
 
 
 # ---------------------------------------------------------------------------
@@ -369,65 +380,46 @@ def test_get_mount_and_drive_falls_back_to_find_dn(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_unmount_skips_subprocess_when_no_drive(monkeypatch, caplog) -> None:
+def test_unmount_skips_when_no_drive(monkeypatch, caplog) -> None:
     monkeypatch.setattr(formatting, "_get_mount_and_drive", lambda: (None, None, {}))
-
-    def bad_run(*a, **kw):
-        raise AssertionError("subprocess.run must not be called")
-
-    monkeypatch.setattr(formatting.subprocess, "run", bad_run)
+    monkeypatch.setattr(
+        formatting, "umount_lazy", lambda target: (_ for _ in ()).throw(AssertionError("must not be called"))
+    )
     formatting.unmount()
     assert "No drive node found" in caplog.text
 
 
-def test_remount_skips_subprocess_when_no_drive(monkeypatch, caplog) -> None:
+def test_remount_skips_when_no_drive(monkeypatch, caplog) -> None:
     monkeypatch.setattr(formatting, "_get_mount_and_drive", lambda: (None, None, {}))
-
-    def bad_run(*a, **kw):
-        raise AssertionError("subprocess.run must not be called")
-
-    monkeypatch.setattr(formatting.subprocess, "run", bad_run)
+    monkeypatch.setattr(
+        formatting, "block_mount", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("must not be called"))
+    )
     formatting.remount()
     assert "No drive node found" in caplog.text
 
 
-def test_unmount_issues_umount_command(monkeypatch) -> None:
+def test_unmount_calls_umount_lazy(monkeypatch) -> None:
     mount = "/media/testuser/USB"
     drive = "/dev/sdb1"
     monkeypatch.setattr(formatting, "_get_mount_and_drive", lambda: (mount, drive, {}))
     monkeypatch.setattr(formatting.glob, "glob", lambda path: [drive])
     calls = []
-    monkeypatch.setattr(formatting.subprocess, "run", lambda cmd, *a, **kw: calls.append(cmd))
-    monkeypatch.setattr(formatting.time, "sleep", lambda x: None)
+    monkeypatch.setattr(formatting, "umount_lazy", lambda target: calls.append(target) or True)
     formatting.unmount()
-    assert any("umount" in cmd for cmd in calls), f"umount not found in {calls}"
-    assert any(drive in cmd for cmd in calls)
-    assert calls[-1] == ["udevadm", "settle"]
+    assert drive in calls, f"umount_lazy not called with {drive}: got {calls}"
 
 
-def test_unmount_calls_unmount_fail_and_returns_false_on_error(monkeypatch) -> None:
+def test_unmount_handles_already_unmounted(monkeypatch) -> None:
     mount = "/media/testuser/USB"
     drive = "/dev/sdb1"
 
     monkeypatch.setattr(formatting, "_get_mount_and_drive", lambda: (mount, drive, {}))
     monkeypatch.setattr(formatting.glob, "glob", lambda *a, **kw: [drive])
 
-    unmount_fail_calls = []
-
-    def fake_run(cmd, *a, **kw):
-        raise formatting.subprocess.CalledProcessError(returncode=1, cmd=cmd)
-
-    monkeypatch.setattr(formatting.subprocess, "run", fake_run)
-
-    def fake_unmount_fail(*args, **kwargs):
-        unmount_fail_calls.append((args, kwargs))
-
-    monkeypatch.setattr(formatting, "unmount_fail", fake_unmount_fail)
+    monkeypatch.setattr(formatting, "umount_lazy", lambda target: False)
 
     result = formatting.unmount()
-
-    assert result is False
-    assert unmount_fail_calls, "unmount_fail should be called when umount fails"
+    assert result is True  # already unmounted is not a fatal error
 
 
 def test_unmount_handles_multiple_partitions(monkeypatch) -> None:
@@ -438,15 +430,13 @@ def test_unmount_handles_multiple_partitions(monkeypatch) -> None:
     monkeypatch.setattr(formatting.glob, "glob", lambda *a, **kw: [f"{drive}1", f"{drive}2"])
 
     calls = []
-    monkeypatch.setattr(formatting.subprocess, "run", lambda cmd, *a, **kw: calls.append(cmd))
+    monkeypatch.setattr(formatting, "umount_lazy", lambda target: calls.append(target) or True)
 
     result = formatting.unmount()
 
     assert result is True
-    assert len(calls) == 3
-    assert calls[0][0] == "umount"
-    assert calls[1][0] == "umount"
-    assert calls[2][0] == "udevadm"
+    assert len(calls) == 2
+    assert all(drive_prefix in c for c in calls for drive_prefix in [drive])
 
 
 def test_remount_calls_format_fail_and_returns_false_on_error(monkeypatch) -> None:
@@ -458,15 +448,8 @@ def test_remount_calls_format_fail_and_returns_false_on_error(monkeypatch) -> No
 
     format_fail_calls = []
 
-    def fake_run(cmd, *a, **kw):
-        raise formatting.subprocess.CalledProcessError(returncode=1, cmd=cmd)
-
-    monkeypatch.setattr(formatting.subprocess, "run", fake_run)
-
-    def fake_format_fail(*args, **kwargs):
-        format_fail_calls.append((args, kwargs))
-
-    monkeypatch.setattr(formatting, "format_fail", fake_format_fail)
+    monkeypatch.setattr(formatting, "block_mount", lambda *a, **kw: False)
+    monkeypatch.setattr(formatting, "format_fail", lambda: format_fail_calls.append(True))
 
     result = formatting.remount()
 
@@ -479,9 +462,9 @@ def test_remount_issues_mount_command(monkeypatch) -> None:
     drive = "/dev/sdb1"
     monkeypatch.setattr(formatting, "_get_mount_and_drive", lambda: (mount, drive, {}))
     calls = []
-    monkeypatch.setattr(formatting.subprocess, "run", lambda cmd, *a, **kw: calls.append(cmd))
+    monkeypatch.setattr(formatting, "block_mount", lambda *a, **kw: calls.append(a) or True)
     formatting.remount()
-    assert calls and calls[0][0] == "mount" and drive in calls[0] and mount in calls[0]
+    assert calls and calls[0][0] == drive and calls[0][1] == mount, f"Expected ({drive}, {mount}) in {calls}"
 
 
 # I think these are Redundant so i commented them out for now

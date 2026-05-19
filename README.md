@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<a href="https://github.com/Hog185/Lufus/blob/main/LICENSE">![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)</a>
+<a href="https://github.com/Hogjects/Lufus/blob/main/LICENSE">![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)</a>
 <a href="https://discord.gg/QrbHJuYvzB">![Discord](https://img.shields.io/discord/1477694881127469202?style=flat\&logo=https%3A%2F%2Fcdn.discordapp.com%2Ficons%2F1477694881127469202%2F1b2c4e8defc9220de11098108fa1ed81.webp%3Fsize%3D256\&logoColor=rgb\&label=Join%20Server\&link=https%3A%2F%2Fdiscord.gg%2FTMnXwezsyV)</a>
 <a href="#beta-release-disclaimer">![Status: Beta](https://img.shields.io/badge/status-beta-orange)</a>
 

@@ -1,5 +1,4 @@
 from __future__ import annotations
-import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,16 +37,16 @@ def test_find_usb_returns_mount_to_label_mapping(monkeypatch) -> None:
         lambda *args, **kwargs: [SimpleNamespace(mountpoint=mount_path, device="/dev/sdb1")],
     )
     monkeypatch.setattr(
-        find_usb_module.subprocess,
-        "check_output",
-        lambda *args, **kwargs: "lufus_USB\n",
+        find_usb_module,
+        "get_device_label",
+        lambda _device: "lufus_USB",
     )
 
     result = find_usb_module.find_usb()
     assert result == {mount_path: "lufus_USB"}
 
 
-def test_find_usb_falls_back_to_dir_name_when_lsblk_fails(monkeypatch) -> None:
+def test_find_usb_falls_back_to_dir_name_when_sysfs_fails(monkeypatch) -> None:
     user = "testuser"
     mount_path = f"/media/{user}/NO_LABEL"
 
@@ -73,10 +72,11 @@ def test_find_usb_falls_back_to_dir_name_when_lsblk_fails(monkeypatch) -> None:
         lambda *args, **kwargs: [SimpleNamespace(mountpoint=mount_path, device="/dev/sdc1")],
     )
 
-    def raise_lsblk_error(*args, **kwargs):
-        raise subprocess.CalledProcessError(returncode=1, cmd="lsblk")
-
-    monkeypatch.setattr(find_usb_module.subprocess, "check_output", raise_lsblk_error)
+    monkeypatch.setattr(
+        find_usb_module,
+        "get_device_label",
+        lambda _device: None,
+    )
 
     result = find_usb_module.find_usb()
     assert result == {mount_path: "NO_LABEL"}

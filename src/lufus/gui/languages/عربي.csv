@@ -4,7 +4,7 @@ log_window_title,lufus سجلات
 about_window_title,عن البرنامج
 settings_window_title,الاعدادات
 btn_copy_log,نسخ إلي الحافظة
-btn_save_log,يتم حفظ السجل...
+btn_save_log,حفظ السجل...
 dlg_save_log_title,حفظ السجلات
 save_failed_title,فشل الحفظ
 save_failed_body,لم يتم حفظ السجل:
@@ -90,10 +90,10 @@ dlg_select_image_title,اختار ملف الصورة
 dlg_select_image_filter,Disk Images (*.iso *.dmg *.img *.bin *.raw);;كل الملفات (*)
 about_content,"لوفس (lufus) هو برنامج مصنوع بلغة بايثون لنظام تشغيل لينيكس.
 مستوحى من برنامج روفس (rufus) الأصلي لنظام تشغيل ويندوز.
-GitHub: github.com/hog185/lufus"
+GitHub: https://github.com/Hogjects/Lufus"
 about_subtitle,أداة USB Flash
 btn_close,إغلاق
-btn_ok,OK
+btn_ok,موافق
 combo_boot_default,installation_media.iso
 tooltip_website,الموقع
 settings_label_theme,السمة
@@ -136,3 +136,7 @@ acc_website,فتح موقع Lufus
 acc_about,عن Lufus
 acc_settings,فتح الإعدادات
 acc_log,فتح نافذة السجل
+btn_discord,الانضمام إلى خادم Discord
+btn_github,فتح مستودع GitHub
+msgbox_flash_warning_title,تحذير: سيتم تدمير جميع البيانات الموجودة على الجهاز!
+msgbox_flash_warning_body,"للمتابعة في هذه العملية، انقر فوق موافق. للإنهاء، انقر فوق إلغاء الأمر."

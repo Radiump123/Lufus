@@ -87,10 +87,11 @@ msgbox_scan_error_body,Не вдалося просканувати USB-прис
 no_usb_found,USB-пристроїв не знайдено
 dlg_select_image_title,Вибрати образ диска
 dlg_select_image_filter,ISO-образи (*.iso);;Усі файли (*)
-about_content,lufus — це інструмент запису образів дисків написаний на Python для Linux.
+about_content,"Lufus — це інструмент запису образів дисків написаний на Python для Linux.
+GitHub: https://github.com/Hogjects/Lufus"
 about_subtitle,Інструмент запису USB
 btn_close,Закрити
-btn_ok,OK
+btn_ok,ОК
 combo_boot_default,installation_media.iso
 tooltip_website,Вебсайт
 settings_label_theme,Тема
@@ -133,3 +134,7 @@ acc_website,Відкрити сайт Lufus
 acc_about,Про Lufus
 acc_settings,Відкрити налаштування
 acc_log,Відкрити вікно журналу
+btn_discord,Приєднатися до сервера Discord
+btn_github,Відкрити репозиторій GitHub
+msgbox_flash_warning_title,УВАГА: ВСІ ДАНІ НА ПРИСТРОЇ БУДУТЬ ЗНИЩЕНІ!
+msgbox_flash_warning_body,"Щоб продовжити операцію, натисніть ОК. Щоб вийти, натисніть СКАСУВАТИ."

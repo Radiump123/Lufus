@@ -12,8 +12,14 @@ log = get_logger(__name__)
 
 
 def _load_initial_theme():
+    # Check environment variable first (passed during elevation)
+    env_theme = os.environ.get("LUFUS_THEME")
+    if env_theme:
+        state.theme = env_theme
+        return
+
     # Load theme before elevation so it can be passed via env
-    if getattr(state, "theme", ""):
+    if getattr(state, "theme", "") and state.theme != "default":
         return
     try:
         _theme_cfg = Path(user_config_dir("Lufus")) / "active_theme"
@@ -21,6 +27,26 @@ def _load_initial_theme():
             state.theme = _theme_cfg.read_text(encoding="utf-8").strip()
     except Exception:
         pass
+
+
+def _load_initial_language():
+    # If already set via environment (e.g. during elevation), prioritize it
+    env_lang = os.environ.get("LUFUS_LANGUAGE")
+    if env_lang:
+        state.language = env_lang
+        return
+
+    # Load persisted language preference; fall back to system locale detection
+    try:
+        _lang_cfg = Path(user_config_dir("Lufus")) / "active_language"
+        if _lang_cfg.exists():
+            state.language = _lang_cfg.read_text(encoding="utf-8").strip()
+        else:
+            from lufus.gui.i18n import detect_system_language
+
+            state.language = detect_system_language()
+    except Exception:
+        state.language = "English"
 
 
 def _show_root_warning() -> None:
@@ -62,12 +88,18 @@ def launch_gui_with_usb_data() -> None:
             log.warning("Could not capture user starting directory: %s", e)
 
         _load_initial_theme()
+        _load_initial_language()
         elevation_attempted = True
         elevate_privileges()
 
     if elevation_attempted and os.geteuid() != 0:
         _show_root_warning()
         sys.exit(1)
+
+    # If we are root (either from start or after elevation), load/restore settings
+    if os.geteuid() == 0:
+        _load_initial_theme()
+        _load_initial_language()
 
     usb_devices = find_usb()
     log.info("Launching GUI with USB devices: %s", usb_devices)
