@@ -34,7 +34,7 @@ def detect_system_language() -> str:
     # Read locale from environment directly (replaces deprecated
     # locale.getdefaultlocale() which is removed in Python 3.15).
     lang_code = ""
-    for var in ("LC_ALL", "LC_MESSAGES", "LC_CTYPE", "LANG", "LANGUAGE"):
+    for var in ("LC_ALL", "LC_CTYPE", "LANG", "LANGUAGE"):
         val = os.environ.get(var)
         if val:
             lang_code = val

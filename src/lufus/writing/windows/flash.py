@@ -176,51 +176,20 @@ def _copy_tree_with_progress(
 
 
 def _find_ntfs_tool(status_cb=None) -> str | None:
-    """Find mkfs.ntfs/mkntfs, installing ntfs-3g if needed. Returns command name or None."""
+    """Find mkfs.ntfs/mkntfs. Returns command name or None."""
     for candidate in ["mkfs.ntfs", "mkntfs"]:
         if shutil.which(candidate):
             return candidate
-
-    if status_cb:
-        status_cb("ntfs-3g not found, attempting to install...")
-    pkg_managers = [
-        ["apt-get", "install", "-y", "ntfs-3g"],
-        ["dnf", "install", "-y", "ntfs-3g"],
-        ["pacman", "-S", "--noconfirm", "ntfs-3g"],
-        ["zypper", "install", "-y", "ntfs-3g"],
-    ]
-    for pm_cmd in pkg_managers:
-        if shutil.which(pm_cmd[0]):
-            run_cmd(pm_cmd)
-            break
-
-    for candidate in ["mkfs.ntfs", "mkntfs"]:
-        if shutil.which(candidate):
-            return candidate
-
     return None
 
 
 def _ensure_wimlib(status_cb=None) -> None:
-    """Install wimlib-imagex if not present. Raises FileNotFoundError if it can't be found after install."""
+    """Check if wimlib-imagex is installed. Raises FileNotFoundError if it can't be found."""
     if shutil.which("wimlib-imagex"):
         return
-    if status_cb:
-        status_cb("wimlib-imagex not found, attempting to install...")
-    pkg_managers = [
-        ["apt-get", "install", "-y", "wimtools"],
-        ["dnf", "install", "-y", "wimlib-utils"],
-        ["pacman", "-S", "--noconfirm", "wimlib"],
-        ["zypper", "install", "-y", "wimtools"],
-    ]
-    for pm_cmd in pkg_managers:
-        if shutil.which(pm_cmd[0]):
-            run_cmd(pm_cmd)
-            break
-    if not shutil.which("wimlib-imagex"):
-        raise FileNotFoundError(
-            "wimlib-imagex not found. Install manually: sudo pacman -S wimlib  /  sudo apt install wimtools"
-        )
+    raise FileNotFoundError(
+        "wimlib-imagex not found. Install manually via your distribution's package manager (e.g. wimtools / wimlib)."
+    )
 
 
 def _copy_with_wim_split(iso_mount, mount_data, extract_used, _status, _emit):

@@ -34,7 +34,10 @@ class _DirRecord:
             return
         self.id_len = data[offset + 32]
         name_raw = data[offset + 33 : offset + 33 + self.id_len]
-        self.name = name_raw.decode("ascii", errors="replace")
+        name_str = name_raw.decode("ascii", errors="replace")
+        if name_str not in ("\x00", "\x01"):
+            name_str = name_str.split(";")[0]
+        self.name = name_str
         self.extent_lba = struct.unpack_from("<I", data, offset + 2)[0]
         self.data_length = struct.unpack_from("<I", data, offset + 10)[0]
         self.flags = data[offset + 25]

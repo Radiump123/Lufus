@@ -71,20 +71,25 @@ from lufus.browse_freely import open_url_non_root
 
 def _processes_using_device(device_node: str) -> list[int]:
     """Return PIDs of processes holding *device_node* open, by scanning /proc."""
+    if not device_node:
+        return []
     pids = []
+    my_pid = os.getpid()
     device_real = os.path.realpath(device_node) if os.path.exists(device_node) else device_node
     try:
         for entry in os.listdir("/proc"):
             if not entry.isdigit():
                 continue
-            pid = entry
-            fd_dir = f"/proc/{pid}/fd"
+            pid_int = int(entry)
+            if pid_int == my_pid:
+                continue
+            fd_dir = f"/proc/{entry}/fd"
             try:
                 for fd_entry in os.listdir(fd_dir):
                     try:
                         link = os.readlink(f"{fd_dir}/{fd_entry}")
                         if link == device_real or link == device_node:
-                            pids.append(int(pid))
+                            pids.append(pid_int)
                             break
                     except (OSError, ValueError):
                         pass
@@ -1421,7 +1426,7 @@ class LufusWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            device_node = self.get_selected_mount_path()
+            device_node = self.get_selected_mount_path() or getattr(states, "device_node", "")
             self.log_message(f"Cancellation requested for device {device_node}", level="WARN")
 
             try:
