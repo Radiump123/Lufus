@@ -182,10 +182,13 @@ def install_grub(target_device: str) -> bool:
 
         # Formatting
         print(f"--- Formatting {efi_part} and {data_part} ---")
+        subprocess.run(["mkfs.vfat", "-F", "32", "-n", "VTOYEFI", efi_part], check=True)
         subprocess.run(["mkfs.exfat", "-L", "OS_PART", data_part], check=True)
 
         # GRUB Installation
-        block_mount(efi_part, efi_mount, fstype="vfat")
+        if not block_mount(efi_part, efi_mount, fstype="vfat"):
+            print(f"Error: failed to mount {efi_part}. Aborting.")
+            return False
         efi_mounted = True
 
         print("--- Installing GRUB (Legacy + UEFI) ---")

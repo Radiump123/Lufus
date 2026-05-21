@@ -651,8 +651,14 @@ def write_device_image(src_path: str, device: str, bs: int = 4194304, progress_c
             chunk = os.read(src_fd, bs)
             if not chunk:
                 break
-            os.write(dst_fd, chunk)
-            written += len(chunk)
+            
+            bytes_to_write = len(chunk)
+            bytes_written = 0
+            while bytes_written < bytes_to_write:
+                n = os.write(dst_fd, chunk[bytes_written:])
+                bytes_written += n
+            
+            written += bytes_to_write
             if total > 0 and progress_cb:
                 pct = int(written * 100 / total)
                 if pct != last_pct:

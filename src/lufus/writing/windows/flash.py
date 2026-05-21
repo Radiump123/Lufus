@@ -338,11 +338,11 @@ def _data_partition_fstype(scheme: PartitionScheme) -> str | None:
 
 
 def _verify_windows_media_copy(mount_data: str) -> None:
-    sources_dir = os.path.join(mount_data, "sources")
+    sources_dir = _find_path_case_insensitive(mount_data, "sources")
     bootmgr = _find_path_case_insensitive(mount_data, "bootmgr") or _find_path_case_insensitive(
         mount_data, "bootmgr.efi"
     )
-    if not os.path.isdir(sources_dir) or not bootmgr:
+    if not sources_dir or not os.path.isdir(sources_dir) or not bootmgr:
         raise OSError(f"Windows files were not copied to mounted target {mount_data}")
 
 

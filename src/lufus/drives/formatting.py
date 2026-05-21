@@ -343,12 +343,14 @@ def disk_format(status_cb=None) -> bool:
     # Raw device writes work even on mounted devices.  Once the signature
     # is gone, udev won't auto-mount the partition after unmount (it finds
     # no recognizable filesystem).
-    for part in sorted(glob.glob(f"{raw_device}[0-9]*"), reverse=True):
+    # Use both [0-9]* and p[0-9]* to cover NVMe/MMC devices as well.
+    parts = sorted(list(set(glob.glob(f"{raw_device}[0-9]*") + glob.glob(f"{raw_device}p[0-9]*"))), reverse=True)
+    for part in parts:
         # Wipe first 2 MiB of each partition
         wipe_superblock(part, size_mb=2, wipe_end=False)
 
     # Unmount now that signatures are gone — udev won't re-mount.
-    for part in sorted(glob.glob(f"{raw_device}[0-9]*"), reverse=True):
+    for part in parts:
         err = umount_lazy(part)
         if err != 0 and err not in (errno.EINVAL, errno.ENOENT):
             log.warning("Final unmount of %s failed: errno=%d", part, err)
