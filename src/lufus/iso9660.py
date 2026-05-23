@@ -28,11 +28,25 @@ class _DirRecord:
     __slots__ = ("name", "extent_lba", "data_length", "is_dir", "flags", "id_len", "_total_len")
 
     def __init__(self, data: bytes, offset: int):
+        if offset >= len(data):
+            self.name = None
+            self._total_len = 0
+            return
         dr_len = data[offset]
         if dr_len == 0:
             self.name = None
+            self._total_len = 0
+            return
+        # Minimum valid record is 33 bytes (1 dr_len + 1 id_len + up to 31 name)
+        if dr_len < 33 or offset + dr_len > len(data):
+            self.name = None
+            self._total_len = 0
             return
         self.id_len = data[offset + 32]
+        if self.id_len > dr_len - 33:
+            self.name = None
+            self._total_len = 0
+            return
         name_raw = data[offset + 33 : offset + 33 + self.id_len]
         name_str = name_raw.decode("ascii", errors="replace")
         if name_str not in ("\x00", "\x01"):
@@ -70,13 +84,17 @@ def _walk_dir(f, lba: int, length: int) -> list[tuple[str, bool, int, int]]:
     while sector_offset < length:
         data = _read_sector(f, lba + sector_offset // _SECTOR_SIZE)
         pos = sector_offset % _SECTOR_SIZE
+        prev_pos = -1
         while pos < len(data):
             rec = _DirRecord(data, pos)
             if rec.name is None:
                 break
             if not rec.is_current and not rec.is_parent:
                 entries.append((rec.name, rec.is_dir, rec.extent_lba, rec.data_length))
+            prev_pos = pos
             pos = rec.skip(data, pos)
+            if pos <= prev_pos:
+                break
             if pos >= _SECTOR_SIZE:
                 sector_offset += pos
                 break

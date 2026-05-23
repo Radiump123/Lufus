@@ -141,6 +141,11 @@ class FlashWorker(QThread):
                             "Format FAILED. Check the log above for the exact error.",
                         )
                     )
+                    for part in unmounted_parts:
+                        try:
+                            fo.remount(part)
+                        except Exception:
+                            pass
 
             elif image_option == 0:  # Windows
                 # ISO mode (flash_mode 0) uses the specialised flash_windows path.

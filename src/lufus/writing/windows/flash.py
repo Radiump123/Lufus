@@ -487,6 +487,19 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
 
 
 # ---new---
+def _sanitize_mount_name(name: str) -> str:
+    """Sanitize a filesystem name for use as a mount point directory.
+
+    Replaces characters that could enable path traversal (.., /, \\x00)
+    or reserved names with underscores.
+    """
+    safe = re.sub(r"[^a-zA-Z0-9_.\-]", "_", name)
+    safe = safe.strip(". ")
+    if not safe or safe in (".", ".."):
+        safe = "iso_mount"
+    return safe
+
+
 def mount_iso(iso_path: str) -> str | None:
     """Mount an ISO file at /mnt/iso/{name} using a loop device.
 
@@ -501,7 +514,8 @@ def mount_iso(iso_path: str) -> str | None:
     mount_base = "/mnt/iso"
     basename = os.path.basename(iso_path)
     iso_name_without_extension = os.path.splitext(basename)[0]
-    iso_mount_location = os.path.join(mount_base, iso_name_without_extension)
+    safe_name = _sanitize_mount_name(iso_name_without_extension)
+    iso_mount_location = os.path.join(mount_base, safe_name)
 
     _status_print(f"Mounting {iso_path} in {iso_mount_location}")
     if block_mount_iso(iso_path, iso_mount_location):
@@ -609,7 +623,7 @@ UEFI_NTFS_URL = "https://github.com/pbatard/rufus/raw/master/res/uefi/uefi-ntfs.
 # UPDATE THIS HASH whenever you update the bundled/downloaded image.
 # Obtain it with: sha256sum uefi-ntfs.img
 # An empty string disables verification and logs a security warning (dev only).
-_UEFI_NTFS_SHA256 = ""
+_UEFI_NTFS_SHA256 = "d34dfa6117d1f572f115e0f85f87f6c26b65462347d011e4eb1fa03ae2b70a64"
 
 
 def _verify_sha256(path: str, expected: str) -> bool:

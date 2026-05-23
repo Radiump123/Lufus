@@ -101,13 +101,32 @@ def _processes_using_device(device_node: str) -> list[int]:
 
 
 def _kill_processes_using_device(device_node: str) -> int:
-    """Kill all processes using *device_node* and return the count killed."""
+    """Kill all processes using *device_node* and return the count killed.
+
+    Sends SIGTERM first with a grace period, then escalates to SIGKILL
+    for any remaining holdouts.
+    """
+    import signal
+
     pids = _processes_using_device(device_node)
+    if not pids:
+        return 0
+
     for pid in pids:
         try:
-            os.kill(pid, 9)  # SIGKILL
+            os.kill(pid, signal.SIGTERM)
         except OSError:
             pass
+
+    time.sleep(0.5)
+
+    remaining = _processes_using_device(device_node)
+    for pid in remaining:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
     return len(pids)
 
 
