@@ -225,6 +225,8 @@ def win_hardware_bypass(mount: str | None = None) -> bool:
     if not mount:
         log.error("win_hardware_bypass: no USB mount found")
         return False
+    # Use exact keys and values that Windows Setup expects in LabConfig.
+    # Note: chntpw 'newkey' and 'addvalue' must be precise.
     commands = [
         "cd Setup",
         "newkey LabConfig",
@@ -246,6 +248,7 @@ def win_local_acc(mount: str | None = None) -> bool:
     if not mount:
         log.error("win_local_acc: no USB mount found")
         return False
+    # This bypasses the NRO (Network Reporting Obligation) requirement during OOBE.
     commands = ["cd Microsoft\\Windows\\CurrentVersion\\OOBE", "addvalue BypassNRO 4 1", "save", "exit"]
     log.info("win_local_acc: bypassing online account requirement at %s...", mount)
     return _modify_boot_wim_registry(mount, "SOFTWARE", commands, "win_local_acc")
@@ -265,6 +268,8 @@ def win_skip_privacy_questions(mount: str | None = None) -> bool:
         _set_text(oobe, f"{{{ns}}}HidePrivacyExperience", "true")
         _set_text(oobe, f"{{{ns}}}HideOnlineAccountScreens", "true")
         _set_text(oobe, f"{{{ns}}}ProtectYourPC", "3")
+
+        # Ensure the settings are applied to the correct pass
         _save_autounattend(tree, mount)
         log.info("win_skip_privacy_questions: autounattend.xml updated.")
         return True
@@ -283,6 +288,11 @@ def win_local_acc_name(mount: str | None = None) -> bool:
         log.error("win_local_acc_name: invalid username %r, aborting", state.win_local_acc)
         return False
     safe_name = html.escape(user_name, quote=True)
+
+    # Get password if set
+    password = getattr(state, "win_local_acc_pwd", "")
+    safe_pwd = html.escape(password, quote=True)
+
     arch = _detect_arch(mount)
     try:
         tree, comp = _get_autounattend(mount, arch)
@@ -304,13 +314,25 @@ def win_local_acc_name(mount: str | None = None) -> bool:
         if local_accounts is None:
             local_accounts = ET.SubElement(accounts, f"{{{ns}}}LocalAccounts")
 
+        # Add AutoLogon for seamless setup
+        autologon = comp.find(f"{{{ns}}}AutoLogon")
+        if autologon is None:
+            autologon = ET.SubElement(comp, f"{{{ns}}}AutoLogon")
+        _set_text(autologon, f"{{{ns}}}Enabled", "true")
+        _set_text(autologon, f"{{{ns}}}Username", safe_name)
+        pwd_auto = autologon.find(f"{{{ns}}}Password")
+        if pwd_auto is None:
+            pwd_auto = ET.SubElement(autologon, f"{{{ns}}}Password")
+        _set_text(pwd_auto, f"{{{ns}}}Value", safe_pwd)
+        _set_text(pwd_auto, f"{{{ns}}}PlainText", "true")
+
         acct = ET.SubElement(
             local_accounts,
             f"{{{ns}}}LocalAccount",
             {f"{{{wcm}}}action": "add"},
         )
         pwd = ET.SubElement(acct, f"{{{ns}}}Password")
-        ET.SubElement(pwd, f"{{{ns}}}Value").text = ""
+        ET.SubElement(pwd, f"{{{ns}}}Value").text = safe_pwd
         ET.SubElement(pwd, f"{{{ns}}}PlainText").text = "true"
         ET.SubElement(acct, f"{{{ns}}}Description").text = "Primary Local Account"
         ET.SubElement(acct, f"{{{ns}}}DisplayName").text = safe_name

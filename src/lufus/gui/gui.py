@@ -244,6 +244,20 @@ class BackgroundWidget(QWidget):
 class LufusWindow(QMainWindow):
     def __init__(self, usb_devices=None, scale: Scale = None):
         super().__init__()
+        from lufus.utils import InstanceLock
+
+        self.lock = InstanceLock()
+        if not self.lock.acquire():
+            # If we fail to acquire the lock, another instance is running.
+            # We must use QMessageBox.critical and sys.exit(1).
+            # Note: sys.exit(1) here might be too early if app.exec() hasn't run.
+            # But in start_gui.py, we call window = LufusWindow() then window.show().
+            # So this will work.
+            QMessageBox.critical(
+                None, "Lufus Already Running", "Another instance of Lufus is already running. Please close it first."
+            )
+            os._exit(1)
+
         _capture_sane_termios()
         # main window initialization :3
         self._logger = get_logger("gui")
@@ -1445,35 +1459,18 @@ class LufusWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            device_node = self.get_selected_mount_path() or getattr(states, "device_node", "")
-            self.log_message(f"Cancellation requested for device {device_node}", level="WARN")
+            from lufus.utils import ProcessManager
 
-            try:
-                # check what processes are using device :3
-                procs = _processes_using_device(device_node)
-                if procs:
-                    self.log_message(f"Processes using {device_node}: {procs}")
-            except Exception as e:
-                self.log_message(f"Could not check device usage: {e}")
+            ProcessManager.kill_all()
+
+            device_node = self.get_selected_mount_path() or getattr(state, "device_node", "")
+            self.log_message(f"Cancellation requested for device {device_node}", level="WARN")
 
             if self.flash_worker and self.flash_worker.isRunning():
                 # terminate flash worker thread :D
                 self.log_message("Terminating flash worker", level="WARN")
                 self.flash_worker.terminate()
-                if not self.flash_worker.wait(3000):
-                    self.log_message("Flash worker did not stop, forcing quit", level="WARN")
-                    self.flash_worker.quit()
-                    self.flash_worker.wait(2000)
-
-            try:
-                # kill processes using device :3
-                killed = _kill_processes_using_device(device_node)
-                if killed:
-                    self.log_message(f"Killed {killed} process(es) using {device_node}")
-                else:
-                    self.log_message("No processes using device found to kill")
-            except Exception as e:
-                self.log_message(f"Failed to kill processes: {e}")
+                self.flash_worker.wait(2000)
 
             if hasattr(self, "verify_worker") and self.verify_worker and self.verify_worker.isRunning():
                 # terminate verify worker :D
@@ -1482,22 +1479,7 @@ class LufusWindow(QMainWindow):
                 self.verify_worker.wait(2000)
                 self.log_message("Verify worker terminated")
 
-            if self.is_terminal:
-                # reset terminal state :3
-                try:
-                    _reset_terminal()
-                    self.log_message("Terminal reset to sane state")
-                except Exception as e:
-                    self.log_message(f"Failed to reset terminal: {e}")
-
-            # reset ui state :D
-            self.progress_bar.setRange(0, 100)  # exit indeterminate mode
-            self.progress_bar.setValue(0)
-            self.progress_bar.setFormat("")
-            self.btn_start.setEnabled(True)
-            self.btn_cancel.setEnabled(False)
-            self.statusBar.showMessage(self._T.get("status_ready", "Ready"), 0)
-            self._clear_speed_eta()
+            self.on_flash_finished(False)
             self.log_message("Flash process cancelled by user", level="WARN")
 
     def start_process(self):
@@ -1865,6 +1847,15 @@ class LufusWindow(QMainWindow):
         self.btn_icon2.setAccessibleName(self._T.get("acc_about", "About Lufus"))
         self.btn_icon3.setAccessibleName(self._T.get("acc_settings", "Open settings"))
         self.btn_icon4.setAccessibleName(self._T.get("acc_log", "Open log window"))
+
+    def closeEvent(self, event):
+        # clean up on window close :3
+        from lufus.utils import ProcessManager
+
+        ProcessManager.kill_all()
+        if self.lock:
+            self.lock.release()
+        event.accept()
 
     def keyPressEvent(self, event):
         # handle keyboard shortcuts :3

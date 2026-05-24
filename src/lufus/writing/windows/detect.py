@@ -114,8 +114,9 @@ def _get_file_listing(iso_path: str) -> "list[str] | None":
 
 # Anchored at the start to avoid matching labels that merely *contain* "win".
 # Covers: Windows 10/11 retail, ESD downloads, MSDN/volume-licence ISOs.
+# Added support for Windows XP, Vista, 7, 8.
 _WIN_LABEL_RE = re.compile(
-    r"^(WIN|ESD-ISO|CC[A-Z0-9]+_[A-Z0-9]+FRE_|CCSDK[A-Z0-9]+)",
+    r"^(WIN|ESD-ISO|CC[A-Z0-9]+_[A-Z0-9]+FRE_|CCSDK[A-Z0-9]+|GRMSXP|WXPFRE|GSP1RM|7[0-9]{3}|MICROSOFT)",
     re.IGNORECASE,
 )
 
@@ -126,6 +127,9 @@ _WIN_FILE_MARKERS = [
     "sources/install.esd",  # Windows setup image (ESD download)
     "sources/install.swm",  # Split setup image (multi-disc)
     "sources/boot.wim",  # Windows PE boot image
+    "i386/txtsetup.sif",  # Windows XP / 2003
+    "setup.exe",  # Windows setup root (Vista+)
+    "bootmgr",  # Windows boot manager (Vista+)
 ]
 
 
@@ -144,46 +148,34 @@ _LINUX_LABEL_RE = re.compile(
     r"backbox|blackarch|bunsenlabs|calculate|devuan|dragora|exherbo|"
     r"funtoo|grml|guixsd|hyperbola|kwort|libreelec|lite|"
     r"peppermint|porteus|q4os|sabayon|siduction|sparky|trisquel|"
-    r"turbolinux|vine|wifislax",
+    r"turbolinux|vine|wifislax|artix|rebornos|biglinux|kaos|nobara",
     re.IGNORECASE,
 )
 
 # Files / directories present ONLY on Linux live and install media.
-#
-# Rules for adding a marker here:
-#   YES — Must not exist in any standard Windows ISO
-#   YES — Must be specific enough to avoid substring collisions
-#   NO  — Do not add efi/boot/ or boot/efi/ — Windows ISOs have those too
-#
 _LINUX_FILE_MARKERS = [
-    # ---- SysLinux / ISOLINUX (Linux-only bootloaders) ----
     "isolinux/isolinux.cfg",
     "syslinux/syslinux.cfg",
     "syslinux/ldlinux.c32",
-    # ---- GRUB config files — Linux-only for optical/USB media ----
-    # Windows uses BCD / bootmgr; it never ships grub.cfg on install media.
     "boot/grub/grub.cfg",
     "boot/grub/i386-pc/",
     "grub/grub.cfg",
-    # ---- Ubuntu / Kubuntu / Xubuntu / Mint (Casper live system) ----
     "casper/filesystem.squashfs",
     "casper/filesystem.manifest",
     "casper/vmlinuz",
-    # ---- Debian / Kali / Tails / Parrot (live-boot) ----
     "live/filesystem.squashfs",
     "live/filesystem.manifest",
     "live/vmlinuz",
-    # ---- Ubuntu / Debian installer marker ----
     ".disk/info",
-    # ---- Arch Linux (specific sub-paths, not the broad "arch/" directory) ----
     "arch/pkglist.x86_64.txt",
     "arch/boot/x86_64/vmlinuz-linux",
-    # ---- Fedora / RHEL / CentOS installer (Anaconda) ----
     "images/pxeboot/vmlinuz",
     ".discinfo",
-    # ---- Generic kernel presence under known Linux-only directories ----
     "boot/vmlinuz",
     "boot/bzimage",
+    "vmlinuz",
+    "initrd.img",
+    "boot/initrd",
 ]
 
 
@@ -192,19 +184,45 @@ _LINUX_FILE_MARKERS = [
 # ---------------------------------------------------------------------------
 
 
+def is_bootable(listing: list[str]) -> bool:
+    """Check if the file listing suggests the image is bootable (BIOS or UEFI)."""
+    boot_markers = [
+        "bootmgr",
+        "bootmgr.efi",
+        "efi/boot/bootx64.efi",
+        "efi/boot/bootaa64.efi",
+        "isolinux/isolinux.bin",
+        "syslinux/ldlinux.c32",
+        "boot/grub/grub.cfg",
+        "grub/grub.cfg",
+        "arch/boot/",
+        "i386/txtsetup.sif",
+        "boot/vmlinuz",
+    ]
+    lower_listing = [f.lower() for f in listing]
+    for marker in boot_markers:
+        if any(marker in f for f in lower_listing):
+            return True
+    return False
+
+
 def detect_iso_type(iso_path: str) -> IsoType:
     """Detect the OS family of an ISO image using pure Python.
 
     Returns IsoType.WINDOWS, IsoType.LINUX, or IsoType.OTHER.
-
-    Step 1 reads the ISO 9660 PVD label (instant, no subprocess).
-    Step 2 walks the ISO 9660 directory tree (pure Python) to find
-    OS-specific marker files.
     """
     log.info("ISO detection: checking %s", iso_path)
 
+    listing = _get_file_listing(iso_path)
+    if listing is None:
+        log.warning("ISO detection: could not read ISO directory — defaulting to Other.")
+        return IsoType.OTHER
+
+    if not is_bootable(listing):
+        log.warning("ISO detection: image %s does not appear to be bootable!", iso_path)
+
     # ------------------------------------------------------------------
-    # Step 1 — PVD label (no subprocess, instant, works without any tools)
+    # Step 1 — PVD label
     # ------------------------------------------------------------------
     label = _read_pvd_label(iso_path)
     log.info("ISO detection: PVD label=%r", label)
@@ -218,22 +236,14 @@ def detect_iso_type(iso_path: str) -> IsoType:
             return IsoType.LINUX
 
     # ------------------------------------------------------------------
-    # Step 2 — File listing (pure Python ISO 9660 reader)
+    # Step 2 — File listing
     # ------------------------------------------------------------------
-    listing = _get_file_listing(iso_path)
-
-    if listing is None:
-        log.warning("ISO detection: could not read ISO directory — defaulting to Other.")
-        return IsoType.OTHER
-
-    # Windows markers first
     lower_listing = [f.lower() for f in listing]
     for marker in _WIN_FILE_MARKERS:
         if marker.lower() in lower_listing:
             log.info("ISO detection: found Windows marker %r -> Windows", marker)
             return IsoType.WINDOWS
 
-    # Linux markers second
     for marker in _LINUX_FILE_MARKERS:
         if marker.lower() in lower_listing:
             log.info("ISO detection: found Linux marker %r -> Linux", marker)

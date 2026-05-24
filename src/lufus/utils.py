@@ -1,5 +1,92 @@
 import os
 import re
+import sys
+import signal
+import fcntl
+import logging
+import subprocess
+from typing import List
+
+log = logging.getLogger("lufus")
+
+
+class ProcessManager:
+    """Track and manage external subprocesses for reliable termination."""
+
+    _procs: List["subprocess.Popen"] = []
+
+    @classmethod
+    def register(cls, proc: "subprocess.Popen"):
+        cls._procs.append(proc)
+
+    @classmethod
+    def unregister(cls, proc: "subprocess.Popen"):
+        if proc in cls._procs:
+            cls._procs.remove(proc)
+
+    @classmethod
+    def kill_all(cls):
+        """Terminate all registered subprocesses."""
+        import signal
+
+        if not cls._procs:
+            return
+
+        log.warning("ProcessManager: terminating %d subprocesses...", len(cls._procs))
+        for proc in cls._procs:
+            try:
+                if proc.poll() is None:  # still running
+                    # Try SIGTERM first
+                    os.kill(proc.pid, signal.SIGTERM)
+            except OSError:
+                pass
+
+        # Wait a bit for graceful exit
+        import time
+
+        time.sleep(0.5)
+
+        for proc in cls._procs[:]:
+            try:
+                if proc.poll() is None:
+                    log.warning("ProcessManager: forcing SIGKILL on PID %d", proc.pid)
+                    os.kill(proc.pid, signal.SIGKILL)
+                cls.unregister(proc)
+            except OSError:
+                cls.unregister(proc)
+
+
+class InstanceLock:
+    """Ensure only one instance of Lufus is running."""
+
+    def __init__(self):
+        self.lock_file = "/run/lufus/lufus.lock"
+        self.fd = None
+
+    def acquire(self) -> bool:
+        try:
+            os.makedirs(os.path.dirname(self.lock_file), mode=0o700, exist_ok=True)
+            self.fd = os.open(self.lock_file, os.O_RDWR | os.O_CREAT, 0o600)
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # Write PID to lock file
+            os.ftruncate(self.fd, 0)
+            os.write(self.fd, str(os.getpid()).encode())
+            return True
+        except (OSError, IOError):
+            if self.fd:
+                os.close(self.fd)
+                self.fd = None
+            return False
+
+    def release(self):
+        if self.fd:
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_UN)
+                os.close(self.fd)
+                os.unlink(self.lock_file)
+            except Exception:
+                pass
+            self.fd = None
 
 
 def elevate_privileges() -> None:

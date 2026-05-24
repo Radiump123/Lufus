@@ -34,11 +34,39 @@ def run_cmd(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess |
     Used only for tools that have no pure Python equivalent
     (mkfs.*, wimlib-imagex, package managers).
     """
+    from lufus.utils import ProcessManager
+
     try:
         log.info("Executing: %s", shlex.join(cmd))
-        return subprocess.run(cmd, check=check, shell=False)
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True,
+        )
+        ProcessManager.register(proc)
+        try:
+            # Stream output to log in real-time
+            for line in proc.stdout:
+                line = line.strip()
+                if line:
+                    log.debug("[%s] %s", cmd[0], line)
+
+            ret = proc.wait()
+            if check and ret != 0:
+                raise subprocess.CalledProcessError(ret, cmd)
+            return subprocess.CompletedProcess(cmd, ret)
+        finally:
+            ProcessManager.unregister(proc)
     except subprocess.CalledProcessError as e:
         log.error("run_cmd failed: %s — %s", shlex.join(cmd), e)
+        if check:
+            raise
+        return None
+    except Exception as e:
+        log.error("run_cmd unexpected error: %s", e)
         if check:
             raise
         return None

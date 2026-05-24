@@ -317,24 +317,41 @@ class WinTweaks(QDialog):
         self.username_input.setMaxLength(20)
         self.username_input.setValidator(validator)
         self.username_input.setPlaceholderText("Enter username here...")
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("Enter password here (Optional)...")
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setMaxLength(127)
+
         self.microsoft_checkbox.toggled.connect(self.localacc_checkbox.setEnabled)
         self.localacc_checkbox.toggled.connect(self.username_input.setEnabled)
+        self.localacc_checkbox.toggled.connect(self.password_input.setEnabled)
+
         self.username_input.setEnabled(self.localacc_checkbox.isChecked())
+        self.password_input.setEnabled(self.localacc_checkbox.isChecked())
+
         self.username_input.textChanged.connect(self.sync_username)
+        self.password_input.textChanged.connect(self.sync_password)
+
         self.data_checkbox = QCheckBox("Disable data collection (skip privacy questions)")
         self.data_checkbox.stateChanged.connect(self.update_winprivacy)
         self.applytweaks_btn = QPushButton(self._T.get("btn_ok", "OK"))
         self.applytweaks_btn.clicked.connect(self.applywintweaks)
         self.canceltweaks_btn = QPushButton(self._T.get("btn_cancel", "Cancel"))
         self.canceltweaks_btn.clicked.connect(self.reject)  # closes window
+
         layout = QVBoxLayout()
-        layout.setSpacing(15)
+        layout.setSpacing(10)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.addWidget(self.ask_label, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.hardware_checkbox)
         layout.addWidget(self.microsoft_checkbox)
         layout.addWidget(self.localacc_checkbox)
-        layout.addWidget(self.username_input)
+
+        acc_layout = QHBoxLayout()
+        acc_layout.addWidget(self.username_input)
+        acc_layout.addWidget(self.password_input)
+        layout.addLayout(acc_layout)
+
         layout.addWidget(self.data_checkbox)
         button_layout = QHBoxLayout()
         button_layout.addWidget(self.applytweaks_btn)
@@ -375,6 +392,10 @@ class WinTweaks(QDialog):
     def sync_username(self, new_username):
         # changes local username
         states.win_local_acc = new_username
+
+    def sync_password(self, new_password):
+        # changes local password
+        states.win_local_acc_pwd = new_password
 
     def update_winprivacy(self):
         # update win privacy setting
