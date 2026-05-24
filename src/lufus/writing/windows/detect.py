@@ -257,19 +257,41 @@ def get_windows_version(iso_path: str) -> int | None:
     """Detect Windows version from the ISO. Returns 10, 11, or None.
 
     Attempts to find the version by:
-    1. Checking the PVD label for 'W11' or 'Win11'.
-    2. Probing setup.exe or other files if necessary (future enhancement).
+    1. Checking the PVD label for 'W11', 'Win11', or modern build names.
+    2. Checking for specific file markers if label is ambiguous.
     """
     label = _read_pvd_label(iso_path).upper()
-    if not label:
-        return None
+    log.info("get_windows_version: label=%r", label)
 
-    # Common Windows 11 label patterns: WIN11_..., W11_..., CC..._W11...
+    # Explicit version in label
     if "W11" in label or "WIN11" in label:
         return 11
     if "W10" in label or "WIN10" in label:
         return 10
 
-    # If label doesn't specify, we'd need to probe files like 'sources/inf/setup.inf'
-    # but for now we'll stick to labels which is 99% of modern official ISOs.
+    # Build names in label
+    # Win11: NI (Nickel), MY (Manganese/Sun Valley), GE (Germanium)
+    # Win10: VB (Vibranium), MN (Manganese), FE (Iron)
+    if any(tag in label for tag in ["NI_RELEASE", "MY_RELEASE", "GE_RELEASE"]):
+        log.info("get_windows_version: found Win11 build tag in label")
+        return 11
+    if any(tag in label for tag in ["VB_RELEASE", "MN_RELEASE", "FE_RELEASE"]):
+        log.info("get_windows_version: found Win10 build tag in label")
+        return 10
+
+    # Fallback to file markers if it's recognized as Windows
+    if is_windows_iso(iso_path):
+        listing = _get_file_listing(iso_path)
+        if listing:
+            lower_listing = [f.lower() for f in listing]
+            # One differentiator: Win11 media usually includes 'sources/inf/setup.inf'
+            # and specific new appraiser files, though this is not 100% stable.
+            # A more reliable one is checking for the presence of certain newer drivers or files.
+            # For now, if we can't be sure, we check if the label matches the CC..._DV9 pattern
+            # which is common for recent 23H2/24H2 images.
+            if "_DV9" in label or "_DV8" in label:
+                # DV9 is Win11 23H2, DV8 is Win11 22H2 (usually)
+                log.info("get_windows_version: label contains DV8/DV9, assuming Win11")
+                return 11
+
     return None

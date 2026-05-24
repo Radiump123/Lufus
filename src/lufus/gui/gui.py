@@ -1564,7 +1564,9 @@ class LufusWindow(QMainWindow):
             if state.image_option == 0 and state.flash_mode == 0:
                 from lufus.writing.windows.detect import get_windows_version
 
-                if get_windows_version(state.iso_path) == 11:
+                win_ver = get_windows_version(state.iso_path)
+                self.log_message(f"Detected Windows version: {win_ver}")
+                if win_ver == 11:
                     dlg = WinTweaks(self)
                     result = dlg.exec()
                     self.log_message(f"WinTweaks dialog closed with result: {result}")
@@ -1572,8 +1574,9 @@ class LufusWindow(QMainWindow):
                         self.log_message("Flash cancelled in WinTweaks dialog", level="WARN")
                         return
                 else:
-                    self.log_message("Windows version is not 11, skipping WinTweaks dialog")
+                    self.log_message(f"Windows version is {win_ver}, skipping WinTweaks dialog (only for Win11)")
             self.log_message("Proceeding to perform_flash")
+
             self.perform_flash()
 
     def on_verify_finished(self, success: bool):
@@ -1585,7 +1588,9 @@ class LufusWindow(QMainWindow):
             if state.image_option == 0 and state.flash_mode == 0:
                 from lufus.writing.windows.detect import get_windows_version
 
-                if get_windows_version(state.iso_path) == 11:
+                win_ver = get_windows_version(state.iso_path)
+                self.log_message(f"Detected Windows version: {win_ver}")
+                if win_ver == 11:
                     dlg = WinTweaks(self)
                     if dlg.exec() == QDialog.DialogCode.Rejected:
                         self.btn_start.setEnabled(True)
@@ -1593,7 +1598,10 @@ class LufusWindow(QMainWindow):
                         self.progress_bar.setValue(0)
                         self.progress_bar.setFormat("")
                         return
+                else:
+                    self.log_message(f"Windows version is {win_ver}, skipping WinTweaks dialog (only for Win11)")
             self.perform_flash()
+
         else:
             # verification failed  (╯°□°)╯( ┻━┻
             self.log_message("SHA256 verification FAILED", level="ERROR")
