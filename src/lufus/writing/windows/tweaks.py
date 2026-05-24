@@ -137,7 +137,7 @@ def _boot_wim_path(mount: str) -> str:
 
 def _get_setup_image_index(boot_wim: str) -> str:
     """Return the index of the Windows Setup image in boot.wim.
-    
+
     Usually index 2, but we probe with wiminfo to be sure.
     """
     try:
@@ -177,14 +177,14 @@ def _modify_boot_wim_registry(mount: str, hive: str, commands: list[str], label:
         if not os.path.exists(hive_path):
             # Try lowercase windows/system32/config
             hive_path = os.path.join(temp_mount, "windows", "system32", "config", hive.lower())
-        
+
         if not os.path.exists(hive_path):
             log.error("%s: hive file %s not found in boot.wim image %s", label, hive, index)
             return False
 
         cmd2 = ["chntpw", "-e", hive_path]
         log.info("Executing: %s (with registry commands)", shlex.join(cmd2))
-        # We don't use check=True here because chntpw might exit with non-zero 
+        # We don't use check=True here because chntpw might exit with non-zero
         # even if commands were successful (e.g. if it didn't like some input).
         # We'll check the output instead.
         proc = subprocess.run(
@@ -194,7 +194,7 @@ def _modify_boot_wim_registry(mount: str, hive: str, commands: list[str], label:
             capture_output=True,
             check=False,
         )
-        
+
         if "writable" not in proc.stdout.lower() and "opened read only" in proc.stdout.lower():
             log.error("%s: chntpw could only open hive %s in read-only mode!", label, hive)
             return False

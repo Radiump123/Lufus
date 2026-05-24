@@ -41,6 +41,16 @@ def elevate_privileges() -> None:
         "LUFUS_DOWNLOAD_DIR",
     ]
 
+    # In dev mode, we need to pass the current PYTHONPATH so the root process
+    # can find the lufus package. We only do this if we are running from a
+    # source tree (detected by the presence of src/lufus/__init__.py).
+    # We restrict it to the absolute path of 'src' to prevent injection.
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    src_dir = os.path.join(project_root, "src")
+    if os.path.exists(os.path.join(src_dir, "lufus", "__init__.py")):
+        env["PYTHONPATH"] = src_dir
+        env_vars.append("PYTHONPATH")
+
     cmd = ["pkexec", "env"]
     for var in env_vars:
         val = os.environ.get(var) or env.get(var)

@@ -1562,12 +1562,17 @@ class LufusWindow(QMainWindow):
         else:
             # skip verification and start flash :3
             if state.image_option == 0 and state.flash_mode == 0:
-                dlg = WinTweaks(self)
-                result = dlg.exec()
-                self.log_message(f"WinTweaks dialog closed with result: {result}")
-                if result == QDialog.DialogCode.Rejected:
-                    self.log_message("Flash cancelled in WinTweaks dialog", level="WARN")
-                    return
+                from lufus.writing.windows.detect import get_windows_version
+
+                if get_windows_version(state.iso_path) == 11:
+                    dlg = WinTweaks(self)
+                    result = dlg.exec()
+                    self.log_message(f"WinTweaks dialog closed with result: {result}")
+                    if result == QDialog.DialogCode.Rejected:
+                        self.log_message("Flash cancelled in WinTweaks dialog", level="WARN")
+                        return
+                else:
+                    self.log_message("Windows version is not 11, skipping WinTweaks dialog")
             self.log_message("Proceeding to perform_flash")
             self.perform_flash()
 
@@ -1578,13 +1583,16 @@ class LufusWindow(QMainWindow):
             self.progress_bar.setFormat("")
             self._clear_speed_eta()
             if state.image_option == 0 and state.flash_mode == 0:
-                dlg = WinTweaks(self)
-                if dlg.exec() == QDialog.DialogCode.Rejected:
-                    self.btn_start.setEnabled(True)
-                    self.btn_cancel.setEnabled(False)
-                    self.progress_bar.setValue(0)
-                    self.progress_bar.setFormat("")
-                    return
+                from lufus.writing.windows.detect import get_windows_version
+
+                if get_windows_version(state.iso_path) == 11:
+                    dlg = WinTweaks(self)
+                    if dlg.exec() == QDialog.DialogCode.Rejected:
+                        self.btn_start.setEnabled(True)
+                        self.btn_cancel.setEnabled(False)
+                        self.progress_bar.setValue(0)
+                        self.progress_bar.setFormat("")
+                        return
             self.perform_flash()
         else:
             # verification failed  (╯°□°)╯( ┻━┻

@@ -405,7 +405,7 @@ def test_unmount_calls_umount_lazy(monkeypatch) -> None:
     monkeypatch.setattr(formatting.glob, "glob", lambda path: [drive])
     calls = []
     # Mock block_umount to return a "busy" error so that umount_lazy is called
-    monkeypatch.setattr(formatting, "block_umount", lambda target: 16) # 16 = EBUSY
+    monkeypatch.setattr(formatting, "block_umount", lambda target: 16)  # 16 = EBUSY
     monkeypatch.setattr(formatting, "umount_lazy", lambda target: calls.append(target) or 0)
     formatting.unmount()
     assert drive in calls, f"umount_lazy not called with {drive}: got {calls}"
@@ -419,8 +419,11 @@ def test_unmount_handles_already_unmounted(monkeypatch) -> None:
     monkeypatch.setattr(formatting.glob, "glob", lambda *a, **kw: [drive])
 
     import errno
+
     monkeypatch.setattr(formatting, "block_umount", lambda target: errno.EINVAL)
-    monkeypatch.setattr(formatting, "umount_lazy", lambda target: (_ for _ in ()).throw(AssertionError("must not be called")))
+    monkeypatch.setattr(
+        formatting, "umount_lazy", lambda target: (_ for _ in ()).throw(AssertionError("must not be called"))
+    )
 
     result = formatting.unmount()
     assert result is True  # already unmounted is not a fatal error

@@ -253,6 +253,23 @@ def is_windows_iso(iso_path: str) -> bool:
     return detect_iso_type(iso_path) == IsoType.WINDOWS
 
 
-def is_linux_iso(iso_path: str) -> bool:
-    """Return True if iso_path is a Linux distribution image."""
-    return detect_iso_type(iso_path) == IsoType.LINUX
+def get_windows_version(iso_path: str) -> int | None:
+    """Detect Windows version from the ISO. Returns 10, 11, or None.
+
+    Attempts to find the version by:
+    1. Checking the PVD label for 'W11' or 'Win11'.
+    2. Probing setup.exe or other files if necessary (future enhancement).
+    """
+    label = _read_pvd_label(iso_path).upper()
+    if not label:
+        return None
+
+    # Common Windows 11 label patterns: WIN11_..., W11_..., CC..._W11...
+    if "W11" in label or "WIN11" in label:
+        return 11
+    if "W10" in label or "WIN10" in label:
+        return 10
+
+    # If label doesn't specify, we'd need to probe files like 'sources/inf/setup.inf'
+    # but for now we'll stick to labels which is 99% of modern official ISOs.
+    return None

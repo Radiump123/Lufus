@@ -609,7 +609,7 @@ def wipe_superblock(device: str, size_mb: int = 5, wipe_end: bool = True) -> boo
             fd = os.open(device, flags | os.O_EXCL)
         except OSError:
             fd = os.open(device, flags)
-            
+
         with os.fdopen(fd, "wb", buffering=0) as f:
             # Zero first size_mb MB
             written = 0

@@ -75,7 +75,7 @@ def unmount(drive: str = None) -> bool:
             # If regular unmount fails (e.g. EBUSY), try lazy unmount as a fallback
             log.warning("Regular unmount of %s failed (errno=%d), trying lazy unmount...", target, err)
             err = umount_lazy(target)
-        
+
         if err == 0:
             time.sleep(0.2)
             log.info("Unmounted %s successfully.", target)
@@ -85,7 +85,7 @@ def unmount(drive: str = None) -> bool:
             log.error("Failed to unmount %s: errno=%d (%s)", target, err, os.strerror(err))
             unmount_fail()
             return False
-    time.sleep(1.0) # Give kernel/udev some time to breathe
+    time.sleep(1.0)  # Give kernel/udev some time to breathe
     return True
 
 
@@ -98,16 +98,17 @@ def remount(drive: str = None) -> bool:
         # drive was supplied by caller; resolve mount point from current state
         _, _, mount_dict = _get_mount_and_drive()
         # find the mount point whose device node matches the given drive
-        # We need to find if any key in mount_dict (the mount point) 
+        # We need to find if any key in mount_dict (the mount point)
         # is associated with the given drive. find_usb returns {mountpoint: label}.
-        # Wait, find_usb doesn't return the device node. 
+        # Wait, find_usb doesn't return the device node.
         # Let's use psutil directly or similar.
         import psutil
+
         for part in psutil.disk_partitions(all=True):
             if part.device == drive:
                 mount = part.mountpoint
                 break
-    
+
     if not drive:
         log.error("No drive node found. Cannot remount.")
         return False
@@ -360,7 +361,7 @@ def disk_format(status_cb=None) -> bool:
             log.warning("Initial unmount of %s failed (errno=%d), trying lazy unmount...", part, err)
             umount_lazy(part)
         time.sleep(0.2)
-    
+
     # 2. Wipe filesystem signatures on the raw device and all partitions.
     # Wiping the raw device first helps prevent udev from re-probing partitions.
     wipe_superblock(raw_device, size_mb=2)
