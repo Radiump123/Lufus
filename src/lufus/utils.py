@@ -36,7 +36,6 @@ def elevate_privileges() -> None:
         "XAUTHORITY",
         "XDG_RUNTIME_DIR",
         "WAYLAND_DISPLAY",
-        "PYTHONPATH",
         "LUFUS_THEME",
         "LUFUS_LANGUAGE",
         "LUFUS_DOWNLOAD_DIR",

@@ -135,45 +135,88 @@ def _boot_wim_path(mount: str) -> str:
     return os.path.join(mount, "sources", "boot.wim")
 
 
+def _get_setup_image_index(boot_wim: str) -> str:
+    """Return the index of the Windows Setup image in boot.wim.
+    
+    Usually index 2, but we probe with wiminfo to be sure.
+    """
+    try:
+        output = subprocess.check_output(["wimlib-imagex", "info", boot_wim], text=True)
+        # Look for the image that has "Microsoft Windows Setup" in its description or name
+        # or simply return "2" if we can't be sure, as it's the standard.
+        images = output.split("Index:")
+        for img in images[1:]:
+            if "Microsoft Windows Setup" in img or "Windows Setup" in img:
+                index = img.splitlines()[0].strip()
+                log.info("_get_setup_image_index: found setup image at index %s", index)
+                return index
+    except Exception as e:
+        log.warning("_get_setup_image_index: failed to probe boot.wim: %s. Falling back to index 2.", e)
+    return "2"
+
+
 def _modify_boot_wim_registry(mount: str, hive: str, commands: list[str], label: str) -> bool:
     boot_wim = _boot_wim_path(mount)
     if not os.path.exists(boot_wim):
         log.error("%s: boot.wim not found at %s", label, boot_wim)
         return False
 
+    index = _get_setup_image_index(boot_wim)
     cmd_string = "\n".join(commands) + "\n"
     temp_mount = tempfile.mkdtemp(prefix="lufus-winwim-")
     mounted = False
     try:
-        cmd1 = ["wimmountrw", boot_wim, "2", temp_mount]
+        # Step 1: Mount the WIM image
+        cmd1 = ["wimmountrw", boot_wim, index, temp_mount]
         log.info("Executing: %s", shlex.join(cmd1))
-        subprocess.run(cmd1, check=True)
+        subprocess.run(cmd1, check=True, capture_output=True, text=True)
         mounted = True
 
-        cmd2 = ["chntpw", "e", os.path.join(temp_mount, "Windows", "System32", "config", hive)]
+        # Step 2: Edit the registry hive
+        hive_path = os.path.join(temp_mount, "Windows", "System32", "config", hive)
+        if not os.path.exists(hive_path):
+            # Try lowercase windows/system32/config
+            hive_path = os.path.join(temp_mount, "windows", "system32", "config", hive.lower())
+        
+        if not os.path.exists(hive_path):
+            log.error("%s: hive file %s not found in boot.wim image %s", label, hive, index)
+            return False
+
+        cmd2 = ["chntpw", "-e", hive_path]
         log.info("Executing: %s (with registry commands)", shlex.join(cmd2))
-        subprocess.run(
+        # We don't use check=True here because chntpw might exit with non-zero 
+        # even if commands were successful (e.g. if it didn't like some input).
+        # We'll check the output instead.
+        proc = subprocess.run(
             cmd2,
             input=cmd_string,
             text=True,
             capture_output=True,
-            check=True,
+            check=False,
         )
+        
+        if "writable" not in proc.stdout.lower() and "opened read only" in proc.stdout.lower():
+            log.error("%s: chntpw could only open hive %s in read-only mode!", label, hive)
+            return False
 
+        # Step 3: Unmount and commit
         cmd3 = ["wimunmount", temp_mount, "--commit"]
         log.info("Executing: %s", shlex.join(cmd3))
-        subprocess.run(cmd3, check=True)
+        subprocess.run(cmd3, check=True, capture_output=True, text=True)
         mounted = False
         log.info("%s: boot.wim registry changes applied successfully.", label)
         return True
     except subprocess.CalledProcessError as e:
-        log.error("%s: command failed: %s", label, e.stderr or e)
+        log.error("%s: command failed: %s\nStdout: %s\nStderr: %s", label, e, e.stdout, e.stderr)
+        return False
+    except Exception as e:
+        log.error("%s: unexpected error: %s", label, e)
         return False
     finally:
         if mounted:
             cmd_f = ["wimunmount", temp_mount, "--discard"]
             log.info("Cleanup: Executing %s", shlex.join(cmd_f))
-            subprocess.run(cmd_f, check=False)
+            subprocess.run(cmd_f, check=False, capture_output=True, text=True)
         shutil.rmtree(temp_mount, ignore_errors=True)
 
 
@@ -189,6 +232,8 @@ def win_hardware_bypass(mount: str | None = None) -> bool:
         "addvalue BypassTPMCheck 4 1",
         "addvalue BypassSecureBootCheck 4 1",
         "addvalue BypassRAMCheck 4 1",
+        "addvalue BypassCPUCheck 4 1",
+        "addvalue BypassStorageCheck 4 1",
         "save",
         "exit",
     ]

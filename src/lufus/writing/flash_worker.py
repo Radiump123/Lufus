@@ -26,8 +26,21 @@ except OSError:
     # /run not writable (unusual); use a non-guessable name as best-effort
     pid_file = f"/tmp/lufus_helper_{os.getpid()}.pid"
 
-# O_CREAT | O_TRUNC with mode 0o600 — safe because the directory is 0o700 root-owned
-_fd = os.open(pid_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+# O_CREAT | O_EXCL with mode 0o600 — safe because it fails if the file already exists,
+# preventing symlink attacks in /tmp.
+try:
+    _fd = os.open(pid_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+except FileExistsError:
+    # If it exists, maybe a previous run crashed. For /run, we might overwrite,
+    # but for /tmp it's safer to just fail or use a different name.
+    if pid_file.startswith("/tmp"):
+        _err = f"PID file {pid_file} already exists, aborting for security."
+        print(f"STATUS:{_err}")
+        sys.exit(1)
+    else:
+        # In /run/lufus, we trust the directory is root-owned and safe.
+        _fd = os.open(pid_file, os.O_WRONLY | os.O_TRUNC, 0o600)
+
 try:
     os.write(_fd, str(os.getpid()).encode())
 finally:
@@ -87,18 +100,15 @@ def main():
         image_option = options["image_option"]
 
         # Unmount all partitions
-        _msg = f"Unmounting all partitions on {device_node}..."
+        _msg = f"Ensuring {device_node} is unmounted..."
         print(f"STATUS:{_msg}")
         sys.stdout.flush()
         log.info(_msg)
 
-        partitions = glob.glob(f"{device_node}*")
-        for part in partitions:
-            _pmsg = f"Unmounting {part}..."
-            print(f"STATUS:{_pmsg}")
-            sys.stdout.flush()
-            log.info(_pmsg)
-            fo.unmount(part)
+        if not fo.unmount(device_node):
+            _err = f"Failed to unmount {device_node}. Is it in use?"
+            status_cb(f"ERROR: {_err}")
+            sys.exit(1)
 
         if image_option == 4:  # Ventoy
             from lufus.writing.install_ventoy import install_grub

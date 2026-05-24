@@ -66,22 +66,26 @@ def unmount(drive: str = None) -> bool:
     if not drive:
         log.error("No drive node found. Cannot unmount.")
         return False
-    targets = glob.glob(f"{drive}*")
+    targets = sorted(glob.glob(f"{drive}*"), reverse=True)
     log.info("Unmounting %s...", drive)
     for target in targets:
-        err = umount_lazy(target)
+        # Try a regular unmount first to ensure data is flushed and device is released
+        err = block_umount(target)
+        if err != 0 and err not in (errno.EINVAL, errno.ENOENT):
+            # If regular unmount fails (e.g. EBUSY), try lazy unmount as a fallback
+            log.warning("Regular unmount of %s failed (errno=%d), trying lazy unmount...", target, err)
+            err = umount_lazy(target)
+        
         if err == 0:
-            time.sleep(0.5)
+            time.sleep(0.2)
             log.info("Unmounted %s successfully.", target)
         elif err in (errno.EINVAL, errno.ENOENT):
-            # Target may already be unmounted — not a fatal error
             log.info("Unmounted %s (was already unmounted or not a mount).", target)
         else:
-            # Real failure (e.g. EBUSY)
             log.error("Failed to unmount %s: errno=%d (%s)", target, err, os.strerror(err))
             unmount_fail()
             return False
-    time.sleep(0.5)
+    time.sleep(1.0) # Give kernel/udev some time to breathe
     return True
 
 
@@ -94,12 +98,21 @@ def remount(drive: str = None) -> bool:
         # drive was supplied by caller; resolve mount point from current state
         _, _, mount_dict = _get_mount_and_drive()
         # find the mount point whose device node matches the given drive
-        mount = next((mp for mp, _label in mount_dict.items()), None)
+        # We need to find if any key in mount_dict (the mount point) 
+        # is associated with the given drive. find_usb returns {mountpoint: label}.
+        # Wait, find_usb doesn't return the device node. 
+        # Let's use psutil directly or similar.
+        import psutil
+        for part in psutil.disk_partitions(all=True):
+            if part.device == drive:
+                mount = part.mountpoint
+                break
+    
     if not drive:
-        log.error("No drive node found. Cannot unmount.")
+        log.error("No drive node found. Cannot remount.")
         return False
     if not mount:
-        log.error("No drive node or mount point found. Cannot remount.")
+        log.error("No mount point found for %s. Cannot remount.", drive)
         return False
     log.info("Remounting %s -> %s...", drive, mount)
     try:
@@ -339,22 +352,25 @@ def disk_format(status_cb=None) -> bool:
         log_unexpected_error()
         return False
 
-    # Wipe filesystem signatures on ALL partitions *before* unmounting.
-    # Raw device writes work even on mounted devices.  Once the signature
-    # is gone, udev won't auto-mount the partition after unmount (it finds
-    # no recognizable filesystem).
-    # Use both [0-9]* and p[0-9]* to cover NVMe/MMC devices as well.
+    # 1. Unmount all partitions first to ensure device is not busy.
     parts = sorted(list(set(glob.glob(f"{raw_device}[0-9]*") + glob.glob(f"{raw_device}p[0-9]*"))), reverse=True)
     for part in parts:
-        # Wipe first 2 MiB of each partition
+        err = block_umount(part)
+        if err != 0 and err not in (errno.EINVAL, errno.ENOENT):
+            log.warning("Initial unmount of %s failed (errno=%d), trying lazy unmount...", part, err)
+            umount_lazy(part)
+        time.sleep(0.2)
+    
+    # 2. Wipe filesystem signatures on the raw device and all partitions.
+    # Wiping the raw device first helps prevent udev from re-probing partitions.
+    wipe_superblock(raw_device, size_mb=2)
+    for part in parts:
         wipe_superblock(part, size_mb=2, wipe_end=False)
 
-    # Unmount now that signatures are gone — udev won't re-mount.
-    for part in parts:
-        err = umount_lazy(part)
-        if err != 0 and err not in (errno.EINVAL, errno.ENOENT):
-            log.warning("Final unmount of %s failed: errno=%d", part, err)
-        time.sleep(0.2)
+    # 3. Final wait and partition re-read to ensure kernel is in sync
+    time.sleep(1.0)
+    reread_partitions(raw_device)
+    time.sleep(0.5)
 
     tool_name, args_fn, fs_label, install_hint = fs_configs[fs_type]
     tool = _find_tool(tool_name)

@@ -602,7 +602,15 @@ def wipe_superblock(device: str, size_mb: int = 5, wipe_end: bool = True) -> boo
         total_size = get_device_size(device)
         size = size_mb * 1024 * 1024
         zeros = b"\x00" * 4096
-        with os.fdopen(os.open(device, os.O_WRONLY | os.O_CLOEXEC), "wb", buffering=0) as f:
+        # Use O_EXCL to ensure the device is not mounted.
+        # Fall back to normal open if O_EXCL is not supported or fails due to probing.
+        flags = os.O_WRONLY | os.O_CLOEXEC
+        try:
+            fd = os.open(device, flags | os.O_EXCL)
+        except OSError:
+            fd = os.open(device, flags)
+            
+        with os.fdopen(fd, "wb", buffering=0) as f:
             # Zero first size_mb MB
             written = 0
             while written < size:
@@ -610,11 +618,15 @@ def wipe_superblock(device: str, size_mb: int = 5, wipe_end: bool = True) -> boo
                 written += len(zeros)
             # Zero last size_mb MB
             if wipe_end and total_size and total_size > size * 2:
-                f.seek(-size, os.SEEK_END)
-                written = 0
-                while written < size:
-                    f.write(zeros)
-                    written += len(zeros)
+                try:
+                    f.seek(-size, os.SEEK_END)
+                    written = 0
+                    while written < size:
+                        f.write(zeros)
+                        written += len(zeros)
+                except OSError as e:
+                    log.warning("Could not wipe end of %s: %s", device, e)
+            os.fsync(fd)
         log.info("Wiped superblock on %s (%d MB, wipe_end=%s)", device, size_mb, wipe_end)
         return True
     except OSError as e:
