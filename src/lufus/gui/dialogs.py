@@ -304,21 +304,28 @@ class WinTweaks(QDialog):
         self._T = parent._T if parent else {}
         re = QRegularExpression("^[a-zA-Z0-9_]*$")
         validator = QRegularExpressionValidator(re)
-        self.setWindowTitle("Windows Tweaks (MAY BREAK! USE CAUTION)")
+        self.setWindowTitle(self._T.get("wintweaks_title", "Windows Tweaks (MAY BREAK! USE CAUTION)"))
         self.setFixedSize(600, 300)
-        self.ask_label = QLabel("Do you want to customize your windows installation?")
-        self.hardware_checkbox = QCheckBox("Remove requirement for 4GB+ RAM, Secure Boot and TPM 2.0")
+        self.ask_label = QLabel(self._T.get("wintweaks_ask", "Do you want to customize your windows installation?"))
+        self.hardware_checkbox = QCheckBox(
+            self._T.get("wintweaks_hardware", "Remove requirement for 4GB+ RAM, Secure Boot and TPM 2.0")
+        )
         self.hardware_checkbox.stateChanged.connect(self.update_winhardware)
-        self.microsoft_checkbox = QCheckBox("Remove requirement for an online Microsoft Account")
+        self.microsoft_checkbox = QCheckBox(
+            self._T.get("wintweaks_microsoft", "Remove requirement for an online Microsoft Account")
+        )
         self.microsoft_checkbox.stateChanged.connect(self.update_winmicrosoftacc)
-        self.localacc_checkbox = QCheckBox("Create a local account with username:")
+        self.localacc_checkbox = QCheckBox(self._T.get("wintweaks_local_acc", "Create a local account with username:"))
         self.localacc_checkbox.stateChanged.connect(self.update_winlocalaccchk)
+
         self.username_input = QLineEdit()
         self.username_input.setMaxLength(20)
         self.username_input.setValidator(validator)
-        self.username_input.setPlaceholderText("Enter username here...")
+        self.username_input.setPlaceholderText(self._T.get("wintweaks_user_placeholder", "Enter username here..."))
         self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("Enter password here (Optional)...")
+        self.password_input.setPlaceholderText(
+            self._T.get("wintweaks_pwd_placeholder", "Enter password here (Optional)...")
+        )
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.setMaxLength(127)
 
@@ -326,14 +333,25 @@ class WinTweaks(QDialog):
         self.localacc_checkbox.toggled.connect(self.username_input.setEnabled)
         self.localacc_checkbox.toggled.connect(self.password_input.setEnabled)
 
+        # Load states
+        self.hardware_checkbox.setChecked(getattr(states, "win_hardware_bypass", 0) == 1)
+        self.microsoft_checkbox.setChecked(getattr(states, "win_microsoft_acc", 0) == 1)
+        self.localacc_checkbox.setChecked(getattr(states, "win_local_acc_chk", 0) == 1)
+        self.username_input.setText(getattr(states, "win_local_acc", ""))
+        self.password_input.setText(getattr(states, "win_local_acc_pwd", ""))
+
         self.username_input.setEnabled(self.localacc_checkbox.isChecked())
         self.password_input.setEnabled(self.localacc_checkbox.isChecked())
 
         self.username_input.textChanged.connect(self.sync_username)
         self.password_input.textChanged.connect(self.sync_password)
 
-        self.data_checkbox = QCheckBox("Disable data collection (skip privacy questions)")
+        self.data_checkbox = QCheckBox(
+            self._T.get("wintweaks_privacy", "Disable data collection (skip privacy questions)")
+        )
+        self.data_checkbox.setChecked(getattr(states, "win_privacy", 0) == 1)
         self.data_checkbox.stateChanged.connect(self.update_winprivacy)
+
         self.applytweaks_btn = QPushButton(self._T.get("btn_ok", "OK"))
         self.applytweaks_btn.clicked.connect(self.applywintweaks)
         self.canceltweaks_btn = QPushButton(self._T.get("btn_cancel", "Cancel"))

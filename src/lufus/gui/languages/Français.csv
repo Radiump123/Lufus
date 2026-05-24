@@ -140,3 +140,22 @@ btn_discord,Rejoindre le serveur Discord
 btn_github,Ouvrir le dépôt GitHub
 msgbox_flash_warning_title,ATTENTION : TOUTES LES DONNÉES DU DISQUE SERONT DÉTRUITES !
 msgbox_flash_warning_body,"Pour continuer cette opération, cliquez sur OK. Pour quitter, cliquez sur ANNULER."
+msgbox_already_running_title,Déjà en cours d'exécution
+msgbox_already_running_body,Une autre instance de Lufus est déjà en cours d'exécution. Veuillez la fermer d'abord.
+msgbox_root_required_title,Privilèges Root Requis
+msgbox_root_required_body,Cette application doit être exécutée en tant que root.
+msgbox_root_required_info,"Pour exécuter Lufus en tant que root, vous avez besoin de :
+• pkexec (du paquet polkit)
+• polkit (policy kit) installé sur votre système
+
+Veuillez installer ces paquets via le gestionnaire de paquets de votre distribution."
+msgbox_not_bootable_title,Non Bootable
+msgbox_not_bootable_body,L'image sélectionnée ne semble pas être bootable. Elle pourrait ne pas fonctionner comme support d'installation.
+wintweaks_title,Ajustements Windows (PEUT CASSER ! UTILISER AVEC PRUDENCE)
+wintweaks_ask,Voulez-vous personnaliser votre installation Windows ?
+wintweaks_hardware,"Supprimer les exigences pour 4 Go+ de RAM, Secure Boot et TPM 2.0"
+wintweaks_microsoft,Supprimer l'exigence d'un compte Microsoft en ligne
+wintweaks_local_acc,Créer un compte local avec le nom d'utilisateur :
+wintweaks_user_placeholder,Entrez le nom d'utilisateur ici...
+wintweaks_pwd_placeholder,Entrez le mot de passe ici (Optionnel)...
+wintweaks_privacy,Désactiver la collecte de données (ignorer les questions de confidentialité)

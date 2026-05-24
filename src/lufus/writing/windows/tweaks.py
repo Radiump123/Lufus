@@ -269,6 +269,11 @@ def win_skip_privacy_questions(mount: str | None = None) -> bool:
         _set_text(oobe, f"{{{ns}}}HideOnlineAccountScreens", "true")
         _set_text(oobe, f"{{{ns}}}ProtectYourPC", "3")
 
+        # Add bypass commands to the specialize pass for hardware bypass
+        if getattr(state, "win_hardware_bypass", 0) == 1:
+            log.info("win_skip_privacy_questions: adding hardware bypass to autounattend.xml")
+            _add_registry_bypass_to_xml(tree, arch)
+
         # Ensure the settings are applied to the correct pass
         _save_autounattend(tree, mount)
         log.info("win_skip_privacy_questions: autounattend.xml updated.")
@@ -276,6 +281,64 @@ def win_skip_privacy_questions(mount: str | None = None) -> bool:
     except Exception as e:
         log.error("win_skip_privacy_questions: failed to write autounattend.xml: %s", e)
         return False
+
+
+def _add_registry_bypass_to_xml(tree: ET.ElementTree, arch: str):
+    """Add registry commands to bypass TPM/RAM/SecureBoot during windows installation."""
+    root = tree.getroot()
+    ns = _XML_NS
+
+    # We use the 'specialize' pass to apply registry keys early
+    spec_settings = None
+    for s in root.findall(f"{{{ns}}}settings"):
+        if s.get("pass") == "specialize":
+            spec_settings = s
+            break
+    if spec_settings is None:
+        spec_settings = ET.SubElement(root, f"{{{ns}}}settings", {"pass": "specialize"})
+
+    comp = None
+    for c in spec_settings.findall(f"{{{ns}}}component"):
+        if c.get("name") == "Microsoft-Windows-Deployment":
+            comp = c
+            break
+    if comp is None:
+        comp = ET.SubElement(
+            spec_settings,
+            f"{{{ns}}}component",
+            {
+                "name": "Microsoft-Windows-Deployment",
+                "processorArchitecture": arch,
+                "publicKeyToken": "31bf3856ad364e35",
+                "language": "neutral",
+                "versionScope": "nonSxS",
+            },
+        )
+
+    run_cmd = comp.find(f"{{{ns}}}RunSynchronous")
+    if run_cmd is None:
+        run_cmd = ET.SubElement(comp, f"{{{ns}}}RunSynchronous")
+
+    # Command to add the LabConfig keys
+    commands = [
+        "reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f",
+        "reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f",
+        "reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1 /f",
+        "reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassCPUCheck /t REG_DWORD /d 1 /f",
+        "reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassStorageCheck /t REG_DWORD /d 1 /f",
+    ]
+
+    start_order = 1
+    existing = run_cmd.findall(f"{{{ns}}}RunSynchronousCommand")
+    if existing:
+        start_order = max([int(c.find(f"{{{ns}}}Order").text) for c in existing]) + 1
+
+    for cmd_str in commands:
+        cmd_elem = ET.SubElement(run_cmd, f"{{{ns}}}RunSynchronousCommand", {"wcm:action": "add"})
+        ET.SubElement(cmd_elem, f"{{{ns}}}Description").text = "Bypass Hardware Check"
+        ET.SubElement(cmd_elem, f"{{{ns}}}Order").text = str(start_order)
+        ET.SubElement(cmd_elem, f"{{{ns}}}Path").text = cmd_str
+        start_order += 1
 
 
 def win_local_acc_name(mount: str | None = None) -> bool:

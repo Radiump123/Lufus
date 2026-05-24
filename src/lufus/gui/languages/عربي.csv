@@ -140,3 +140,22 @@ btn_discord,الانضمام إلى خادم Discord
 btn_github,فتح مستودع GitHub
 msgbox_flash_warning_title,تحذير: سيتم تدمير جميع البيانات الموجودة على الجهاز!
 msgbox_flash_warning_body,"للمتابعة في هذه العملية، انقر فوق موافق. للإنهاء، انقر فوق إلغاء الأمر."
+msgbox_already_running_title,Already Running
+msgbox_already_running_body,Another instance of Lufus is already running. Please close it first.
+msgbox_root_required_title,Root Privileges Required
+msgbox_root_required_body,This application must run as root.
+msgbox_root_required_info,"To run Lufus as root, you need:
+• pkexec (from polkit package)
+• polkit (policy kit) installed on your system
+
+Please install these packages via your distribution's package manager."
+msgbox_not_bootable_title,Not Bootable
+msgbox_not_bootable_body,The selected image does not appear to be bootable. It may not work as installation media.
+wintweaks_title,Windows Tweaks (MAY BREAK! USE CAUTION)
+wintweaks_ask,Do you want to customize your windows installation?
+wintweaks_hardware,"Remove requirement for 4GB+ RAM, Secure Boot and TPM 2.0"
+wintweaks_microsoft,Remove requirement for an online Microsoft Account
+wintweaks_local_acc,Create a local account with username:
+wintweaks_user_placeholder,Enter username here...
+wintweaks_pwd_placeholder,Enter password here (Optional)...
+wintweaks_privacy,Disable data collection (skip privacy questions)

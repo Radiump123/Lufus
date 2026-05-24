@@ -130,6 +130,7 @@ _WIN_FILE_MARKERS = [
     "i386/txtsetup.sif",  # Windows XP / 2003
     "setup.exe",  # Windows setup root (Vista+)
     "bootmgr",  # Windows boot manager (Vista+)
+    "ntldr",  # Windows XP bootloader
 ]
 
 
@@ -184,72 +185,106 @@ _LINUX_FILE_MARKERS = [
 # ---------------------------------------------------------------------------
 
 
-def is_bootable(listing: list[str]) -> bool:
+def _get_info_via_file_cmd(iso_path: str) -> str:
+    """Run 'file' command on the ISO to get descriptive info."""
+    import subprocess
+
+    try:
+        # -b = brief (no filename), -L = follow symlinks
+        result = subprocess.run(["file", "-bL", iso_path], capture_output=True, text=True, timeout=2)
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
+def is_bootable(listing: list[str], iso_path: str = None) -> bool:
     """Check if the file listing suggests the image is bootable (BIOS or UEFI)."""
-    boot_markers = [
-        "bootmgr",
-        "bootmgr.efi",
-        "efi/boot/bootx64.efi",
-        "efi/boot/bootaa64.efi",
-        "isolinux/isolinux.bin",
-        "syslinux/ldlinux.c32",
-        "boot/grub/grub.cfg",
-        "grub/grub.cfg",
-        "arch/boot/",
-        "i386/txtsetup.sif",
-        "boot/vmlinuz",
-    ]
-    lower_listing = [f.lower() for f in listing]
-    for marker in boot_markers:
-        if any(marker in f for f in lower_listing):
+
+    # 1. Check listing if available
+    if listing:
+        strict_markers = {
+            "bootmgr",
+            "bootmgr.efi",
+            "ntldr",
+            "efi/boot/bootx64.efi",
+            "efi/boot/bootaa64.efi",
+            "efi/boot/bootia32.efi",
+            "efi/boot/bootarm.efi",
+            "isolinux/isolinux.bin",
+            "syslinux/ldlinux.c32",
+            "i386/txtsetup.sif",
+        }
+
+        prefix_markers = ["boot/grub/", "grub/", "arch/boot/", "images/pxeboot/"]
+        lower_listing = {f.lower().strip("/") for f in listing}
+
+        for marker in strict_markers:
+            if marker in lower_listing:
+                return True
+
+        for prefix in prefix_markers:
+            prefix_l = prefix.lower()
+            if any(f.startswith(prefix_l) for f in lower_listing):
+                if "grub" in prefix_l:
+                    if any("grub.cfg" in f for f in lower_listing):
+                        return True
+                else:
+                    return True
+
+    # 2. Fallback to 'file' command (detects El Torito boot info even if UDF tree is unreadable)
+    if iso_path:
+        info = _get_info_via_file_cmd(iso_path).lower()
+        if "bootable" in info or "boot image" in info:
+            log.info("is_bootable: 'file' command detected bootable flag")
             return True
+
     return False
 
 
 def detect_iso_type(iso_path: str) -> IsoType:
-    """Detect the OS family of an ISO image using pure Python.
-
-    Returns IsoType.WINDOWS, IsoType.LINUX, or IsoType.OTHER.
-    """
+    """Detect the OS family of an ISO image using pure Python + 'file' fallback."""
     log.info("ISO detection: checking %s", iso_path)
 
-    listing = _get_file_listing(iso_path)
-    if listing is None:
-        log.warning("ISO detection: could not read ISO directory — defaulting to Other.")
-        return IsoType.OTHER
-
-    if not is_bootable(listing):
-        log.warning("ISO detection: image %s does not appear to be bootable!", iso_path)
-
-    # ------------------------------------------------------------------
-    # Step 1 — PVD label
-    # ------------------------------------------------------------------
+    # 1. Read label
     label = _read_pvd_label(iso_path)
-    log.info("ISO detection: PVD label=%r", label)
 
+    # 2. Run 'file' command for hints (label and family)
+    file_info = _get_info_via_file_cmd(iso_path)
+    log.info("ISO detection: file info=%r", file_info)
+
+    # 3. Get listing
+    listing = _get_file_listing(iso_path)
+
+    # 4. Logic hierarchy
+
+    # Priority A: File markers (very reliable)
+    if listing:
+        lower_listing = {f.lower().strip("/") for f in listing}
+        for marker in _WIN_FILE_MARKERS:
+            if marker.lower() in lower_listing:
+                return IsoType.WINDOWS
+        if "i386/txtsetup.sif" in lower_listing or "setup.exe" in lower_listing:
+            return IsoType.WINDOWS
+        for marker in _LINUX_FILE_MARKERS:
+            if marker.lower() in lower_listing:
+                return IsoType.LINUX
+
+    # Priority B: 'file' command description
+    info_l = file_info.lower()
+    if "windows" in info_l or "microsoft" in info_l:
+        return IsoType.WINDOWS
+    # Many Linux ISOs have the name in the label reported by 'file'
+    if _LINUX_LABEL_RE.search(file_info):
+        return IsoType.LINUX
+
+    # Priority C: PVD Label
     if label:
         if _WIN_LABEL_RE.match(label):
-            log.info("ISO detection: Windows label match -> Windows")
             return IsoType.WINDOWS
         if _LINUX_LABEL_RE.search(label):
-            log.info("ISO detection: Linux label match -> Linux")
             return IsoType.LINUX
 
-    # ------------------------------------------------------------------
-    # Step 2 — File listing
-    # ------------------------------------------------------------------
-    lower_listing = [f.lower() for f in listing]
-    for marker in _WIN_FILE_MARKERS:
-        if marker.lower() in lower_listing:
-            log.info("ISO detection: found Windows marker %r -> Windows", marker)
-            return IsoType.WINDOWS
-
-    for marker in _LINUX_FILE_MARKERS:
-        if marker.lower() in lower_listing:
-            log.info("ISO detection: found Linux marker %r -> Linux", marker)
-            return IsoType.LINUX
-
-    log.info("ISO detection: no definitive markers found -> Other")
+    log.info("ISO detection: defaulting to Other")
     return IsoType.OTHER
 
 

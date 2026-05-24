@@ -57,39 +57,45 @@ class ProcessManager:
 
 
 class InstanceLock:
-    """Ensure only one instance of Lufus is running."""
+    """Ensure only one instance of Lufus is running using abstract sockets.
+
+    Abstract sockets are robust on Linux because:
+    1. They are global to the network namespace (handles root elevation).
+    2. They have no filesystem presence (no stale files on crash).
+    3. They are automatically released by the kernel when the process dies.
+    """
 
     def __init__(self):
-        self.lock_file = "/run/lufus/lufus.lock"
-        self.fd = None
+        self.lock_name = "\0lufus_instance_lock"
+        self.socket = None
 
     def acquire(self) -> bool:
+        import socket
+
         try:
-            os.makedirs(os.path.dirname(self.lock_file), mode=0o700, exist_ok=True)
-            self.fd = os.open(self.lock_file, os.O_RDWR | os.O_CREAT, 0o600)
-            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            # Write PID to lock file
-            os.ftruncate(self.fd, 0)
-            os.write(self.fd, str(os.getpid()).encode())
+            self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+            # Bind to abstract socket (name starts with \0)
+            self.socket.bind(self.lock_name)
+            log.debug("InstanceLock: acquired lock %r", self.lock_name[1:])
             return True
-        except (OSError, IOError):
-            if self.fd:
-                os.close(self.fd)
-                self.fd = None
+        except socket.error:
+            log.debug("InstanceLock: failed to acquire lock %r (already held)", self.lock_name[1:])
+            if self.socket:
+                self.socket.close()
+                self.socket = None
             return False
 
     def release(self):
-        if self.fd:
+        if self.socket:
             try:
-                fcntl.flock(self.fd, fcntl.LOCK_UN)
-                os.close(self.fd)
-                os.unlink(self.lock_file)
+                self.socket.close()
+                log.debug("InstanceLock: released lock %r", self.lock_name[1:])
             except Exception:
                 pass
-            self.fd = None
+            self.socket = None
 
 
-def elevate_privileges() -> None:
+def elevate_privileges(lock: "InstanceLock" = None) -> None:
     """Relaunch the application with root privileges using pkexec."""
     import sys
     import subprocess
@@ -138,6 +144,10 @@ def elevate_privileges() -> None:
         env["PYTHONPATH"] = src_dir
         env_vars.append("PYTHONPATH")
 
+    # Release the lock before starting pkexec so the elevated process can take it.
+    if lock:
+        lock.release()
+
     cmd = ["pkexec", "env"]
     for var in env_vars:
         val = os.environ.get(var) or env.get(var)
@@ -149,10 +159,14 @@ def elevate_privileges() -> None:
         subprocess.run(cmd, check=True)
         sys.exit(0)
     except subprocess.CalledProcessError:
-        # User likely cancelled or pkexec failed/isn't installed
-        pass
+        # User likely cancelled or pkexec failed/isn't installed.
+        # Try to re-acquire the lock if we are continuing as user.
+        if lock:
+            lock.acquire()
     except Exception as e:
         print(f"Elevation failed: {e}")
+        if lock:
+            lock.acquire()
 
 
 def require_root() -> bool:

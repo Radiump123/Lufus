@@ -244,21 +244,11 @@ class BackgroundWidget(QWidget):
 class LufusWindow(QMainWindow):
     def __init__(self, usb_devices=None, scale: Scale = None):
         super().__init__()
-        from lufus.utils import InstanceLock
-
-        self.lock = InstanceLock()
-        if not self.lock.acquire():
-            # If we fail to acquire the lock, another instance is running.
-            # We must use QMessageBox.critical and sys.exit(1).
-            # Note: sys.exit(1) here might be too early if app.exec() hasn't run.
-            # But in start_gui.py, we call window = LufusWindow() then window.show().
-            # So this will work.
-            QMessageBox.critical(
-                None, "Lufus Already Running", "Another instance of Lufus is already running. Please close it first."
-            )
-            os._exit(1)
+        # Instance lock is now handled in start_gui.py and passed to self.lock
+        self.lock = None
 
         _capture_sane_termios()
+
         # main window initialization :3
         self._logger = get_logger("gui")
 
@@ -1242,7 +1232,7 @@ class LufusWindow(QMainWindow):
 
     def _detect_iso_and_update_ui(self, iso_path: str):
         """Automatically detect ISO type and update UI selectors."""
-        from lufus.writing.windows.detect import detect_iso_type, IsoType
+        from lufus.writing.windows.detect import detect_iso_type, IsoType, is_bootable, _get_file_listing
 
         # Non-ISO raw images (.img, .bin, .raw, .dmg) are always "Other / DD mode"
         if not iso_path.lower().endswith(".iso"):
@@ -1252,6 +1242,18 @@ class LufusWindow(QMainWindow):
 
         self.log_message(f"Detecting ISO type for: {iso_path}...")
         iso_type = detect_iso_type(iso_path)
+
+        listing = _get_file_listing(iso_path)
+        if listing and not is_bootable(listing, iso_path=iso_path):
+            self.log_message("WARNING: Selected image does not appear to be bootable!", level="WARN")
+            QMessageBox.warning(
+                self,
+                self._T.get("msgbox_not_bootable_title", "Not Bootable"),
+                self._T.get(
+                    "msgbox_not_bootable_body",
+                    "The selected image does not appear to be bootable. It may not work as installation media.",
+                ),
+            )
 
         if iso_type == IsoType.WINDOWS:
             self.log_message("Detected Windows ISO")
@@ -1771,15 +1773,25 @@ class LufusWindow(QMainWindow):
             return
         if self._flash_total_bytes > 0:
             bytes_done = int(pct / 100 * self._flash_total_bytes)
-            # rolling 8-second window for stable speed estimation
+            # Use a longer window for ETA stability (12 seconds)
             self._speed_samples.append((now, bytes_done))
-            cutoff = now - 8.0
+            cutoff = now - 12.0
             self._speed_samples = [(t, b) for t, b in self._speed_samples if t >= cutoff]
+
             if len(self._speed_samples) >= 2:
                 dt = self._speed_samples[-1][0] - self._speed_samples[0][0]
                 db = self._speed_samples[-1][1] - self._speed_samples[0][1]
+
                 if dt > 0 and db > 0:
-                    speed = db / dt
+                    # Current window speed
+                    window_speed = db / dt
+
+                    # Also consider overall average speed for smoothing
+                    avg_speed = bytes_done / elapsed
+
+                    # Weighted blend: 70% current window, 30% overall average
+                    speed = (window_speed * 0.7) + (avg_speed * 0.3)
+
                     remaining = self._flash_total_bytes - bytes_done
                     eta_sec = remaining / speed
                     if speed >= 1024 * 1024:
