@@ -148,7 +148,7 @@ def volume_custom_label(target_partition: str = None) -> bool:
     # Commands are passed as lists (shell=False) so shell injection is not possible.
     # Label sanitization above ensures the string is safe for all labelling tools.
 
-    # 0 -> NTFS, 1 -> FAT32, 2 -> exFAT, 3 -> ext4, 4 -> UDF
+    # 0 -> NTFS, 1 -> FAT32, 2 -> exFAT, 3 -> ext4, 4 -> UDF, 5 -> ext2, 6 -> ext3
     fs_type = state.filesystem_index
     cmd_map = {
         0: [_find_tool("ntfslabel"), drive, newlabel],
@@ -156,6 +156,8 @@ def volume_custom_label(target_partition: str = None) -> bool:
         2: [_find_tool("fatlabel"), drive, newlabel],
         3: [_find_tool("e2label"), drive, newlabel],
         4: [_find_tool("udflabel"), drive, newlabel],
+        5: [_find_tool("e2label"), drive, newlabel],
+        6: [_find_tool("e2label"), drive, newlabel],
     }
     cmd = cmd_map.get(fs_type)
     if cmd is None:
@@ -345,6 +347,18 @@ def disk_format(status_cb=None) -> bool:
             lambda: ["--blocksize=" + str(sector_size), raw_device],
             "UDF",
             "udftools",
+        ),
+        5: (
+            "mkfs.ext2",
+            lambda: ["-b", str(block_size), raw_device],
+            "ext2",
+            "e2fsprogs",
+        ),
+        6: (
+            "mkfs.ext3",
+            lambda: ["-b", str(block_size), raw_device],
+            "ext3",
+            "e2fsprogs",
         ),
     }
 

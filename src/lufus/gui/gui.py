@@ -736,12 +736,8 @@ class LufusWindow(QMainWindow):
             "exFAT",
             "ext4",
             "UDF",
-            "HFS+",
             "ext2",
             "ext3",
-            "Btrfs",
-            "XFS",
-            "ZFS",
         ]
         self.combo_fs.addItems(["NTFS", "FAT32", "exFAT"])
         self.combo_fs.currentTextChanged.connect(self.updateFS)
@@ -1000,9 +996,8 @@ class LufusWindow(QMainWindow):
             self.combo_fs.setCurrentText("ext4")
         elif state.image_option == 0:  # windows
             self.combo_fs.clear()
-            # self.combo_fs.addItems(["NTFS", "FAT32", "exFAT"]); self.combo_fs.setCurrentText("NTFS")
-            self.combo_fs.addItems(["FAT32"])
-            self.combo_fs.setCurrentText("FAT32")
+            self.combo_fs.addItems(["NTFS", "FAT32", "exFAT"])
+            self.combo_fs.setCurrentText("NTFS")
         elif state.image_option == 4:  # ventoy
             self.combo_fs.clear()
             self.combo_fs.addItems(["exFAT", "FAT32"])
@@ -1244,16 +1239,22 @@ class LufusWindow(QMainWindow):
         iso_type = detect_iso_type(iso_path)
 
         listing = _get_file_listing(iso_path)
-        if listing and not is_bootable(listing, iso_path=iso_path):
+        if not is_bootable(listing, iso_path=iso_path):
             self.log_message("WARNING: Selected image does not appear to be bootable!", level="WARN")
-            QMessageBox.warning(
+            reply = QMessageBox.question(
                 self,
                 self._T.get("msgbox_not_bootable_title", "Not Bootable"),
                 self._T.get(
-                    "msgbox_not_bootable_body",
-                    "The selected image does not appear to be bootable. It may not work as installation media.",
+                    "msgbox_not_bootable_body_confirm",
+                    "The selected image does not appear to be bootable.\n\nDo you want to continue anyway?",
                 ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
             )
+            if reply != QMessageBox.StandardButton.Yes:
+                state.iso_path = ""
+                self.log_message("ISO selection cancelled due to non-bootable image", level="WARN")
+                return
 
         if iso_type == IsoType.WINDOWS:
             self.log_message("Detected Windows ISO")
@@ -1957,10 +1958,15 @@ class LufusWindow(QMainWindow):
         else:
             self.log_message(f"download later button clicked", level="DEBUG")
 
-    # for win twaks
     def show_tweak_dialog(self):
-        dialog = WinTweaks(self)
-        dialog.exec()
+        from lufus.writing.windows.detect import get_windows_version
+
+        win_ver = get_windows_version(state.iso_path)
+        if win_ver == 11:
+            dialog = WinTweaks(self)
+            dialog.exec()
+        else:
+            self.log_message(f"Windows version is {win_ver}, skipping WinTweaks dialog (only for Win11)")
 
 
 if __name__ == "__main__":

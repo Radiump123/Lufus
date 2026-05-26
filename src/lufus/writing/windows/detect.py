@@ -18,7 +18,7 @@ import re
 from enum import Enum
 
 from lufus.lufus_logging import get_logger
-from lufus.iso9660 import has_any_file, list_files
+from lufus.iso9660 import has_any_file, list_files, read_file
 
 log = get_logger(__name__)
 
@@ -177,7 +177,25 @@ _LINUX_FILE_MARKERS = [
     "vmlinuz",
     "initrd.img",
     "boot/initrd",
+    ".treeinfo",
+    "images/install.img",
 ]
+
+_LINUX_FILE_MARKER_PAIRS = [
+    ("vmlinuz", "initrd.img"),
+    ("vmlinuz", "initrd"),
+    ("casper/vmlinuz", "casper/initrd"),
+    ("live/vmlinuz", "live/initrd"),
+    ("install.amd/vmlinuz", "install.amd/initrd.gz"),
+    ("install.386/vmlinuz", "install.386/initrd.gz"),
+    ("images/pxeboot/vmlinuz", "images/pxeboot/initrd.img"),
+]
+
+_WINDOWS_11_MIN_BUILD = 22000
+_WINDOWS_METADATA_FILES = (
+    "sources/idwbinfo.txt",
+    "sources/cversion.ini",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +215,51 @@ def _get_info_via_file_cmd(iso_path: str) -> str:
         return ""
 
 
+def _normalise_listing(listing: list[str] | None) -> set[str]:
+    return {f.lower().strip("/") for f in listing or []}
+
+
+def _has_marker(paths: set[str], marker: str) -> bool:
+    raw = marker.lower().strip()
+    is_prefix = raw.endswith("/")
+    marker = raw.strip("/")
+    if is_prefix:
+        prefix = marker + "/"
+        return marker in paths or any(path.startswith(prefix) for path in paths)
+    return marker in paths
+
+
+def _looks_like_linux_from_listing(paths: set[str]) -> bool:
+    for marker in _LINUX_FILE_MARKERS:
+        if _has_marker(paths, marker):
+            return True
+
+    for left, right in _LINUX_FILE_MARKER_PAIRS:
+        if _has_marker(paths, left) and _has_marker(paths, right):
+            return True
+
+    return False
+
+
+def _file_info_says_bootable(info: str) -> bool:
+    text = info.lower()
+    if not text:
+        return False
+    if "not bootable" in text or "non-bootable" in text:
+        return False
+    return any(
+        phrase in text
+        for phrase in (
+            "(bootable)",
+            "boot image",
+            "el torito",
+            "dos/mbr boot sector",
+            "boot sector",
+            "efi application",
+        )
+    )
+
+
 def is_bootable(listing: list[str], iso_path: str = None) -> bool:
     """Check if the file listing suggests the image is bootable (BIOS or UEFI)."""
 
@@ -213,28 +276,33 @@ def is_bootable(listing: list[str], iso_path: str = None) -> bool:
             "isolinux/isolinux.bin",
             "syslinux/ldlinux.c32",
             "i386/txtsetup.sif",
+            "boot/grub/i386-pc/eltorito.img",
+            "boot/grub/i386-pc/core.img",
+            "boot/grub/efi.img",
         }
 
-        prefix_markers = ["boot/grub/", "grub/", "arch/boot/", "images/pxeboot/"]
-        lower_listing = {f.lower().strip("/") for f in listing}
+        lower_listing = _normalise_listing(listing)
 
         for marker in strict_markers:
             if marker in lower_listing:
                 return True
 
-        for prefix in prefix_markers:
-            prefix_l = prefix.lower()
-            if any(f.startswith(prefix_l) for f in lower_listing):
-                if "grub" in prefix_l:
-                    if any("grub.cfg" in f for f in lower_listing):
-                        return True
-                else:
-                    return True
+        grub_configs = {"boot/grub/grub.cfg", "grub/grub.cfg"}
+        grub_payloads = {
+            "boot/grub/i386-pc/",
+            "grub/i386-pc/",
+            "boot/grub/x86_64-efi/",
+            "grub/x86_64-efi/",
+        }
+        if any(config in lower_listing for config in grub_configs) and any(
+            _has_marker(lower_listing, payload) for payload in grub_payloads
+        ):
+            return True
 
     # 2. Fallback to 'file' command (detects El Torito boot info even if UDF tree is unreadable)
     if iso_path:
-        info = _get_info_via_file_cmd(iso_path).lower()
-        if "bootable" in info or "boot image" in info:
+        info = _get_info_via_file_cmd(iso_path)
+        if _file_info_says_bootable(info):
             log.info("is_bootable: 'file' command detected bootable flag")
             return True
 
@@ -259,15 +327,14 @@ def detect_iso_type(iso_path: str) -> IsoType:
 
     # Priority A: File markers (very reliable)
     if listing:
-        lower_listing = {f.lower().strip("/") for f in listing}
+        lower_listing = _normalise_listing(listing)
         for marker in _WIN_FILE_MARKERS:
-            if marker.lower() in lower_listing:
+            if _has_marker(lower_listing, marker):
                 return IsoType.WINDOWS
         if "i386/txtsetup.sif" in lower_listing or "setup.exe" in lower_listing:
             return IsoType.WINDOWS
-        for marker in _LINUX_FILE_MARKERS:
-            if marker.lower() in lower_listing:
-                return IsoType.LINUX
+        if _looks_like_linux_from_listing(lower_listing):
+            return IsoType.LINUX
 
     # Priority B: 'file' command description
     info_l = file_info.lower()
@@ -298,6 +365,41 @@ def is_windows_iso(iso_path: str) -> bool:
     return detect_iso_type(iso_path) == IsoType.WINDOWS
 
 
+def is_linux_iso(iso_path: str) -> bool:
+    """Return True if iso_path is a Linux live or installer image."""
+    return detect_iso_type(iso_path) == IsoType.LINUX
+
+
+def _windows_build_from_text(text: str) -> int | None:
+    for match in re.finditer(r"(?<!\d)(?:10\.0\.)?([1-3][0-9]{4})(?:\.\d+)?(?!\d)", text):
+        build = int(match.group(1))
+        if 10000 <= build < 40000:
+            return build
+    return None
+
+
+def _windows_version_from_text(text: str) -> int | None:
+    upper = text.upper()
+    if re.search(r"\b(?:WIN(?:DOWS)?[_ -]?)?11\b|\bW11\b", upper):
+        return 11
+
+    if any(tag in upper for tag in ("CO_RELEASE", "NI_RELEASE", "GE_RELEASE")):
+        return 11
+    if any(tag in upper for tag in ("TH1", "TH2", "RS1", "RS2", "RS3", "RS4", "RS5", "19H1", "19H2")):
+        return 10
+    if any(tag in upper for tag in ("VB_RELEASE", "MN_RELEASE", "FE_RELEASE")):
+        return 10
+
+    build = _windows_build_from_text(upper)
+    if build is not None:
+        return 11 if build >= _WINDOWS_11_MIN_BUILD else 10
+
+    if re.search(r"\b(?:WIN(?:DOWS)?[_ -]?)?10\b|\bW10\b", upper):
+        return 10
+
+    return None
+
+
 def get_windows_version(iso_path: str) -> int | None:
     """Detect Windows version from the ISO. Returns 10, 11, or None.
 
@@ -308,35 +410,26 @@ def get_windows_version(iso_path: str) -> int | None:
     label = _read_pvd_label(iso_path).upper()
     log.info("get_windows_version: label=%r", label)
 
-    # Explicit version in label
-    if "W11" in label or "WIN11" in label:
-        return 11
-    if "W10" in label or "WIN10" in label:
-        return 10
+    for source, text in (
+        ("label", label),
+        ("file", _get_info_via_file_cmd(iso_path)),
+    ):
+        version = _windows_version_from_text(text)
+        if version is not None:
+            log.info("get_windows_version: detected Windows %s from %s", version, source)
+            return version
 
-    # Build names in label
-    # Win11: NI (Nickel), MY (Manganese/Sun Valley), GE (Germanium)
-    # Win10: VB (Vibranium), MN (Manganese), FE (Iron)
-    if any(tag in label for tag in ["NI_RELEASE", "MY_RELEASE", "GE_RELEASE"]):
-        log.info("get_windows_version: found Win11 build tag in label")
-        return 11
-    if any(tag in label for tag in ["VB_RELEASE", "MN_RELEASE", "FE_RELEASE"]):
-        log.info("get_windows_version: found Win10 build tag in label")
-        return 10
+    for metadata_path in _WINDOWS_METADATA_FILES:
+        data = read_file(iso_path, metadata_path)
+        if not data:
+            continue
+        text = data.decode("utf-8", errors="replace")
+        version = _windows_version_from_text(text)
+        if version is not None:
+            log.info("get_windows_version: detected Windows %s from %s", version, metadata_path)
+            return version
 
-    # Fallback to file markers if it's recognized as Windows
-    if is_windows_iso(iso_path):
-        listing = _get_file_listing(iso_path)
-        if listing:
-            lower_listing = [f.lower() for f in listing]
-            # One differentiator: Win11 media usually includes 'sources/inf/setup.inf'
-            # and specific new appraiser files, though this is not 100% stable.
-            # A more reliable one is checking for the presence of certain newer drivers or files.
-            # For now, if we can't be sure, we check if the label matches the CC..._DV9 pattern
-            # which is common for recent 23H2/24H2 images.
-            if "_DV9" in label or "_DV8" in label:
-                # DV9 is Win11 23H2, DV8 is Win11 22H2 (usually)
-                log.info("get_windows_version: label contains DV8/DV9, assuming Win11")
-                return 11
-
+    # Fallback: only return 11 when the label unequivocally says so.
+    # The old DV9/DV8 heuristic was too fragile — many Windows 10 VLSC labels
+    # accidentally matched and triggered the WinTweaks dialog.
     return None

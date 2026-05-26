@@ -150,7 +150,12 @@ class FlashWorker(QThread):
             elif image_option == 0:  # Windows
                 # ISO mode (flash_mode 0) uses the specialised flash_windows path.
                 # Any other mode (e.g. DD) uses the generic flash_usb path.
-                scheme = PartitionScheme.SIMPLE_FAT32
+                fs_text = options.get("fs_text", "NTFS")
+                scheme = {
+                    "NTFS": PartitionScheme.WINDOWS_NTFS,
+                    "FAT32": PartitionScheme.SIMPLE_FAT32,
+                    "exFAT": PartitionScheme.WINDOWS_EXFAT,
+                }.get(fs_text, PartitionScheme.WINDOWS_NTFS)
                 success = flash_usb(
                     device_node,
                     iso_path,

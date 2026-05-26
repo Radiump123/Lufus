@@ -5,7 +5,6 @@ to bypass hardware requirements, skip privacy questions, and create
 local accounts.
 """
 
-import html
 import re
 import subprocess
 import os
@@ -26,8 +25,19 @@ _WIN_USERNAME_RE = re.compile(r'^[^\\\/\[\]:;|=,+*?<>"@\x00-\x1f]{1,20}$')
 _XML_NS = "urn:schemas-microsoft-com:unattend"
 _WCM_NS = "http://schemas.microsoft.com/WMIConfig/2002/State"
 
+# Tools required for registry-based tweaks (boot.wim modification)
+_REQUIRED_TWEAK_TOOLS = ("wimmountrw", "wimunmount", "chntpw", "wimlib-imagex")
+
 ET.register_namespace("", _XML_NS)
 ET.register_namespace("wcm", _WCM_NS)
+
+
+def _check_tweak_deps() -> bool:
+    missing = [t for t in _REQUIRED_TWEAK_TOOLS if shutil.which(t) is None]
+    if missing:
+        log.error("Missing required tools for Windows registry tweaks: %s", ", ".join(missing))
+        return False
+    return True
 
 
 def _detect_arch(mount: str) -> str:
@@ -108,6 +118,99 @@ def _set_text(parent: ET.Element, tag: str, text: str) -> None:
     child.text = text
 
 
+def _get_or_create_settings(root: ET.Element, pass_name: str) -> ET.Element:
+    for settings in root.findall(f"{{{_XML_NS}}}settings"):
+        if settings.get("pass") == pass_name:
+            return settings
+    return ET.SubElement(root, f"{{{_XML_NS}}}settings", {"pass": pass_name})
+
+
+def _get_or_create_component(settings: ET.Element, name: str, arch: str) -> ET.Element:
+    for comp in settings.findall(f"{{{_XML_NS}}}component"):
+        if comp.get("name") == name:
+            return comp
+    return ET.SubElement(
+        settings,
+        f"{{{_XML_NS}}}component",
+        {
+            "name": name,
+            "processorArchitecture": arch,
+            "publicKeyToken": "31bf3856ad364e35",
+            "language": "neutral",
+            "versionScope": "nonSxS",
+        },
+    )
+
+
+def _run_command_order(command: ET.Element) -> int:
+    order = command.find(f"{{{_XML_NS}}}Order")
+    if order is None or not order.text:
+        return 0
+    try:
+        return int(order.text)
+    except ValueError:
+        return 0
+
+
+def _add_run_synchronous_commands(
+    tree: ET.ElementTree,
+    arch: str,
+    pass_name: str,
+    component_name: str,
+    commands: list[str],
+    description: str,
+) -> None:
+    root = tree.getroot()
+    settings = _get_or_create_settings(root, pass_name)
+    comp = _get_or_create_component(settings, component_name, arch)
+
+    run_sync = comp.find(f"{{{_XML_NS}}}RunSynchronous")
+    if run_sync is None:
+        run_sync = ET.SubElement(comp, f"{{{_XML_NS}}}RunSynchronous")
+
+    existing_commands = set()
+    existing_orders = []
+    for command in run_sync.findall(f"{{{_XML_NS}}}RunSynchronousCommand"):
+        path = command.find(f"{{{_XML_NS}}}Path")
+        if path is not None and path.text:
+            existing_commands.add(path.text.strip())
+        existing_orders.append(_run_command_order(command))
+
+    next_order = max(existing_orders, default=0) + 1
+    for command in commands:
+        if command.strip() in existing_commands:
+            continue
+        cmd_elem = ET.SubElement(
+            run_sync,
+            f"{{{_XML_NS}}}RunSynchronousCommand",
+            {f"{{{_WCM_NS}}}action": "add"},
+        )
+        ET.SubElement(cmd_elem, f"{{{_XML_NS}}}Description").text = description
+        ET.SubElement(cmd_elem, f"{{{_XML_NS}}}Order").text = str(next_order)
+        ET.SubElement(cmd_elem, f"{{{_XML_NS}}}Path").text = command
+        next_order += 1
+
+
+_HARDWARE_BYPASS_COMMANDS = [
+    r'cmd /c reg add "HKLM\SYSTEM\Setup\LabConfig" /v BypassTPMCheck /t REG_DWORD /d 1 /f',
+    r'cmd /c reg add "HKLM\SYSTEM\Setup\LabConfig" /v BypassSecureBootCheck /t REG_DWORD /d 1 /f',
+    r'cmd /c reg add "HKLM\SYSTEM\Setup\LabConfig" /v BypassRAMCheck /t REG_DWORD /d 1 /f',
+    r'cmd /c reg add "HKLM\SYSTEM\Setup\LabConfig" /v BypassCPUCheck /t REG_DWORD /d 1 /f',
+    r'cmd /c reg add "HKLM\SYSTEM\Setup\LabConfig" /v BypassStorageCheck /t REG_DWORD /d 1 /f',
+]
+
+
+def _add_windows_pe_hardware_bypass(tree: ET.ElementTree, arch: str) -> None:
+    _add_run_synchronous_commands(
+        tree,
+        arch,
+        "windowsPE",
+        "Microsoft-Windows-Setup",
+        _HARDWARE_BYPASS_COMMANDS,
+        "Bypass Windows 11 hardware checks",
+    )
+
+
 def _validate_windows_username(name: str) -> str | None:
     """Return a stripped, validated Windows username or None if invalid."""
     name = name.strip()
@@ -156,6 +259,9 @@ def _get_setup_image_index(boot_wim: str) -> str:
 
 
 def _modify_boot_wim_registry(mount: str, hive: str, commands: list[str], label: str) -> bool:
+    if not _check_tweak_deps():
+        return False
+
     boot_wim = _boot_wim_path(mount)
     if not os.path.exists(boot_wim):
         log.error("%s: boot.wim not found at %s", label, boot_wim)
@@ -175,7 +281,6 @@ def _modify_boot_wim_registry(mount: str, hive: str, commands: list[str], label:
         # Step 2: Edit the registry hive
         hive_path = os.path.join(temp_mount, "Windows", "System32", "config", hive)
         if not os.path.exists(hive_path):
-            # Try lowercase windows/system32/config
             hive_path = os.path.join(temp_mount, "windows", "system32", "config", hive.lower())
 
         if not os.path.exists(hive_path):
@@ -184,9 +289,6 @@ def _modify_boot_wim_registry(mount: str, hive: str, commands: list[str], label:
 
         cmd2 = ["chntpw", "-e", hive_path]
         log.info("Executing: %s (with registry commands)", shlex.join(cmd2))
-        # We don't use check=True here because chntpw might exit with non-zero
-        # even if commands were successful (e.g. if it didn't like some input).
-        # We'll check the output instead.
         proc = subprocess.run(
             cmd2,
             input=cmd_string,
@@ -195,9 +297,22 @@ def _modify_boot_wim_registry(mount: str, hive: str, commands: list[str], label:
             check=False,
         )
 
-        if "writable" not in proc.stdout.lower() and "opened read only" in proc.stdout.lower():
+        out_lower = proc.stdout.lower()
+        err_lower = proc.stderr.lower()
+
+        # Detect if hive was opened read-only
+        if "readonly" in out_lower and "no write access" in out_lower:
             log.error("%s: chntpw could only open hive %s in read-only mode!", label, hive)
             return False
+
+        # Detect command-level errors (chntpw -e prints errors to stdout)
+        if "error" in out_lower or "error" in err_lower:
+            log.error("%s: chntpw reported errors\nStdout: %s\nStderr: %s", label, proc.stdout, proc.stderr)
+            return False
+
+        # If return code is non-zero and we have stderr output, treat as failure
+        if proc.returncode != 0 and proc.stderr.strip():
+            log.warning("%s: chntpw exit code %d with stderr: %s", label, proc.returncode, proc.stderr.strip())
 
         # Step 3: Unmount and commit
         cmd3 = ["wimunmount", temp_mount, "--commit"]
@@ -225,22 +340,16 @@ def win_hardware_bypass(mount: str | None = None) -> bool:
     if not mount:
         log.error("win_hardware_bypass: no USB mount found")
         return False
-    # Use exact keys and values that Windows Setup expects in LabConfig.
-    # Note: chntpw 'newkey' and 'addvalue' must be precise.
-    commands = [
-        "cd Setup",
-        "newkey LabConfig",
-        "cd LabConfig",
-        "addvalue BypassTPMCheck 4 1",
-        "addvalue BypassSecureBootCheck 4 1",
-        "addvalue BypassRAMCheck 4 1",
-        "addvalue BypassCPUCheck 4 1",
-        "addvalue BypassStorageCheck 4 1",
-        "save",
-        "exit",
-    ]
-    log.info("win_hardware_bypass: injecting registry keys into boot.wim at %s...", mount)
-    return _modify_boot_wim_registry(mount, "SYSTEM", commands, "win_hardware_bypass")
+    arch = _detect_arch(mount)
+    try:
+        tree, _ = _get_autounattend(mount, arch)
+        _add_windows_pe_hardware_bypass(tree, arch)
+        _save_autounattend(tree, mount)
+        log.info("win_hardware_bypass: autounattend.xml hardware bypass commands written at %s", mount)
+        return True
+    except Exception as e:
+        log.error("win_hardware_bypass: failed to write autounattend.xml: %s", e)
+        return False
 
 
 def win_local_acc(mount: str | None = None) -> bool:
@@ -248,10 +357,19 @@ def win_local_acc(mount: str | None = None) -> bool:
     if not mount:
         log.error("win_local_acc: no USB mount found")
         return False
-    # This bypasses the NRO (Network Reporting Obligation) requirement during OOBE.
-    commands = ["cd Microsoft\\Windows\\CurrentVersion\\OOBE", "addvalue BypassNRO 4 1", "save", "exit"]
-    log.info("win_local_acc: bypassing online account requirement at %s...", mount)
-    return _modify_boot_wim_registry(mount, "SOFTWARE", commands, "win_local_acc")
+    arch = _detect_arch(mount)
+    try:
+        tree, comp = _get_autounattend(mount, arch)
+        oobe = _ensure_oobe(comp, _XML_NS)
+        _set_text(oobe, f"{{{_XML_NS}}}HideOnlineAccountScreens", "true")
+        _set_text(oobe, f"{{{_XML_NS}}}HideWirelessSetupInOOBE", "true")
+        _set_text(oobe, f"{{{_XML_NS}}}ProtectYourPC", "3")
+        _save_autounattend(tree, mount)
+        log.info("win_local_acc: autounattend.xml online-account bypass settings written at %s", mount)
+        return True
+    except Exception as e:
+        log.error("win_local_acc: failed to write autounattend.xml: %s", e)
+        return False
 
 
 def win_skip_privacy_questions(mount: str | None = None) -> bool:
@@ -267,6 +385,7 @@ def win_skip_privacy_questions(mount: str | None = None) -> bool:
         _set_text(oobe, f"{{{ns}}}HideEULAPage", "true")
         _set_text(oobe, f"{{{ns}}}HidePrivacyExperience", "true")
         _set_text(oobe, f"{{{ns}}}HideOnlineAccountScreens", "true")
+        _set_text(oobe, f"{{{ns}}}HideWirelessSetupInOOBE", "true")
         _set_text(oobe, f"{{{ns}}}ProtectYourPC", "3")
 
         # Add bypass commands to the specialize pass for hardware bypass
@@ -285,60 +404,7 @@ def win_skip_privacy_questions(mount: str | None = None) -> bool:
 
 def _add_registry_bypass_to_xml(tree: ET.ElementTree, arch: str):
     """Add registry commands to bypass TPM/RAM/SecureBoot during windows installation."""
-    root = tree.getroot()
-    ns = _XML_NS
-
-    # We use the 'specialize' pass to apply registry keys early
-    spec_settings = None
-    for s in root.findall(f"{{{ns}}}settings"):
-        if s.get("pass") == "specialize":
-            spec_settings = s
-            break
-    if spec_settings is None:
-        spec_settings = ET.SubElement(root, f"{{{ns}}}settings", {"pass": "specialize"})
-
-    comp = None
-    for c in spec_settings.findall(f"{{{ns}}}component"):
-        if c.get("name") == "Microsoft-Windows-Deployment":
-            comp = c
-            break
-    if comp is None:
-        comp = ET.SubElement(
-            spec_settings,
-            f"{{{ns}}}component",
-            {
-                "name": "Microsoft-Windows-Deployment",
-                "processorArchitecture": arch,
-                "publicKeyToken": "31bf3856ad364e35",
-                "language": "neutral",
-                "versionScope": "nonSxS",
-            },
-        )
-
-    run_cmd = comp.find(f"{{{ns}}}RunSynchronous")
-    if run_cmd is None:
-        run_cmd = ET.SubElement(comp, f"{{{ns}}}RunSynchronous")
-
-    # Command to add the LabConfig keys
-    commands = [
-        "reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f",
-        "reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f",
-        "reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1 /f",
-        "reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassCPUCheck /t REG_DWORD /d 1 /f",
-        "reg add HKLM\\SYSTEM\\Setup\\LabConfig /v BypassStorageCheck /t REG_DWORD /d 1 /f",
-    ]
-
-    start_order = 1
-    existing = run_cmd.findall(f"{{{ns}}}RunSynchronousCommand")
-    if existing:
-        start_order = max([int(c.find(f"{{{ns}}}Order").text) for c in existing]) + 1
-
-    for cmd_str in commands:
-        cmd_elem = ET.SubElement(run_cmd, f"{{{ns}}}RunSynchronousCommand", {"wcm:action": "add"})
-        ET.SubElement(cmd_elem, f"{{{ns}}}Description").text = "Bypass Hardware Check"
-        ET.SubElement(cmd_elem, f"{{{ns}}}Order").text = str(start_order)
-        ET.SubElement(cmd_elem, f"{{{ns}}}Path").text = cmd_str
-        start_order += 1
+    _add_windows_pe_hardware_bypass(tree, arch)
 
 
 def win_local_acc_name(mount: str | None = None) -> bool:
@@ -350,11 +416,7 @@ def win_local_acc_name(mount: str | None = None) -> bool:
     if user_name is None:
         log.error("win_local_acc_name: invalid username %r, aborting", state.win_local_acc)
         return False
-    safe_name = html.escape(user_name, quote=True)
-
-    # Get password if set
     password = getattr(state, "win_local_acc_pwd", "")
-    safe_pwd = html.escape(password, quote=True)
 
     arch = _detect_arch(mount)
     try:
@@ -367,6 +429,7 @@ def win_local_acc_name(mount: str | None = None) -> bool:
         _set_text(oobe, f"{{{ns}}}HideEULAPage", "true")
         _set_text(oobe, f"{{{ns}}}HidePrivacyExperience", "true")
         _set_text(oobe, f"{{{ns}}}HideOnlineAccountScreens", "true")
+        _set_text(oobe, f"{{{ns}}}HideWirelessSetupInOOBE", "true")
         _set_text(oobe, f"{{{ns}}}ProtectYourPC", "3")
 
         # UserAccounts / LocalAccounts
@@ -382,11 +445,11 @@ def win_local_acc_name(mount: str | None = None) -> bool:
         if autologon is None:
             autologon = ET.SubElement(comp, f"{{{ns}}}AutoLogon")
         _set_text(autologon, f"{{{ns}}}Enabled", "true")
-        _set_text(autologon, f"{{{ns}}}Username", safe_name)
+        _set_text(autologon, f"{{{ns}}}Username", user_name)
         pwd_auto = autologon.find(f"{{{ns}}}Password")
         if pwd_auto is None:
             pwd_auto = ET.SubElement(autologon, f"{{{ns}}}Password")
-        _set_text(pwd_auto, f"{{{ns}}}Value", safe_pwd)
+        _set_text(pwd_auto, f"{{{ns}}}Value", password)
         _set_text(pwd_auto, f"{{{ns}}}PlainText", "true")
 
         acct = ET.SubElement(
@@ -395,12 +458,12 @@ def win_local_acc_name(mount: str | None = None) -> bool:
             {f"{{{wcm}}}action": "add"},
         )
         pwd = ET.SubElement(acct, f"{{{ns}}}Password")
-        ET.SubElement(pwd, f"{{{ns}}}Value").text = safe_pwd
+        ET.SubElement(pwd, f"{{{ns}}}Value").text = password
         ET.SubElement(pwd, f"{{{ns}}}PlainText").text = "true"
         ET.SubElement(acct, f"{{{ns}}}Description").text = "Primary Local Account"
-        ET.SubElement(acct, f"{{{ns}}}DisplayName").text = safe_name
+        ET.SubElement(acct, f"{{{ns}}}DisplayName").text = user_name
         ET.SubElement(acct, f"{{{ns}}}Group").text = "Administrators"
-        ET.SubElement(acct, f"{{{ns}}}Name").text = safe_name
+        ET.SubElement(acct, f"{{{ns}}}Name").text = user_name
 
         _save_autounattend(tree, mount)
         log.info("win_local_acc_name: autounattend.xml updated — local account %r created.", user_name)

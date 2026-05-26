@@ -4,9 +4,9 @@ Reads the Primary Volume Descriptor and recursively walks directory
 records to build a file listing — no external tools required.
 
 This is a minimal, correct implementation sufficient for ISO type
-detection (checking file markers). It does not handle all edge cases
-(multi-extent files, etc.) but correctly lists
-all files via recursive directory traversal.
+detection (checking file markers and reading small metadata files).
+It does not handle all edge cases (multi-extent files, etc.) but
+correctly lists all files via recursive directory traversal.
 """
 
 import struct
@@ -145,6 +145,47 @@ def list_files(iso_path: str) -> list[str] | None:
 
     except OSError as e:
         log.error("list_files: cannot read %s: %s", iso_path, e)
+        return None
+
+
+def read_file(iso_path: str, wanted_path: str, max_bytes: int = 65536) -> bytes | None:
+    """Read a small file from an ISO 9660 image.
+
+    Returns None if the image is unreadable, the path does not exist, or the
+    record is a directory. The read is capped so detection code cannot load
+    large payloads such as install.wim by mistake.
+    """
+    wanted = wanted_path.strip("/").lower()
+    if not wanted:
+        return None
+
+    try:
+        with open(iso_path, "rb") as f:
+            f.seek(_pvd_offset(_PVD_LBA) + 1)
+            if f.read(5) != b"CD001":
+                return None
+
+            pvd = _read_sector(f, _PVD_LBA)
+            root_rec = _DirRecord(pvd, 156)
+            if root_rec.name is None:
+                return None
+
+            work: list[tuple[str, int, int]] = [("", root_rec.extent_lba, root_rec.data_length)]
+            while work:
+                prefix, lba, length = work.pop()
+                for name, is_dir, sub_lba, sub_len in _walk_dir(f, lba, length):
+                    path = prefix + name.lower()
+                    if path == wanted:
+                        if is_dir:
+                            return None
+                        f.seek(_pvd_offset(sub_lba))
+                        return f.read(min(sub_len, max_bytes))
+                    if is_dir and wanted.startswith(path + "/"):
+                        work.append((path + "/", sub_lba, sub_len))
+
+            return None
+    except OSError as e:
+        log.debug("read_file(%s, %s): %s", iso_path, wanted_path, e)
         return None
 
 

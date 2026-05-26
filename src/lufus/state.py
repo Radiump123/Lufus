@@ -11,7 +11,7 @@ class AppState:
     version: str = "v1.0.0"
 
     # Format options
-    filesystem_index: int = 0  # 0=NTFS, 1=FAT32, 2=exFAT, 3=ext4, 4=UDF
+    filesystem_index: int = 0  # 0=NTFS, 1=FAT32, 2=exFAT, 3=ext4, 4=UDF, 5=ext2, 6=ext3
     image_option: int = 0  # 0=Windows, 1=Linux, 2=Other, 3=Format Only, 4=Ventoy
     currentflash: int = 0
     partition_scheme: int = 0  # 0=GPT, 1=MBR
@@ -40,6 +40,7 @@ class AppState:
     win_microsoft_acc: int = 0
     win_local_acc_chk: int = 0
     win_local_acc: str = "default"
+    win_local_acc_pwd: str = ""
     win_privacy: int = 0
 
     # Settings persistence

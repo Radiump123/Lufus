@@ -3,6 +3,7 @@ import logging
 import sys
 import os
 import atexit
+import tempfile
 
 LOG_FILE = os.path.join(os.path.expanduser("~"), ".local", "share", "lufus", "lufus.log")
 
@@ -18,14 +19,18 @@ def setup_logging() -> None:
         return
     _setup_done = True
 
-    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-
     root = logging.getLogger("lufus")
     root.setLevel(logging.DEBUG)
 
     plain = logging.Formatter(_FMT, _DATEFMT)
 
-    fh = logging.FileHandler(LOG_FILE, mode="a", encoding="utf-8", delay=False)
+    log_file = LOG_FILE
+    try:
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        fh = logging.FileHandler(log_file, mode="a", encoding="utf-8", delay=False)
+    except OSError:
+        log_file = os.path.join(tempfile.gettempdir(), "lufus.log")
+        fh = logging.FileHandler(log_file, mode="a", encoding="utf-8", delay=False)
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(plain)
 
@@ -43,8 +48,8 @@ def setup_logging() -> None:
 
     sys.excepthook = _crash_hook
     atexit.register(fh.flush)
-    print(f"[lufus] Log file: {LOG_FILE}", flush=True)
-    root.debug("Logging initialised — log file: %s", LOG_FILE)
+    print(f"[lufus] Log file: {log_file}", flush=True)
+    root.debug("Logging initialised — log file: %s", log_file)
 
 
 def get_logger(name: str) -> logging.Logger:
