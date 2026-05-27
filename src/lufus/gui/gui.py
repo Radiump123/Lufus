@@ -1232,6 +1232,12 @@ class LufusWindow(QMainWindow):
         # Non-ISO raw images (.img, .bin, .raw, .dmg) are always "Other / DD mode"
         if not iso_path.lower().endswith(".iso"):
             self.log_message(f"Non-ISO image ({Path(iso_path).suffix or 'no ext'}), defaulting to Other/DD mode")
+            if not is_bootable([], iso_path=iso_path):
+                self.log_message("WARNING: Selected image does not appear to be bootable!", level="WARN")
+                if not self._confirm_unbootable_image():
+                    state.iso_path = ""
+                    self.log_message("Image selection cancelled due to non-bootable image", level="WARN")
+                    return
             self.combo_image_option.setCurrentIndex(2)  # Other
             return
 
@@ -1241,17 +1247,7 @@ class LufusWindow(QMainWindow):
         listing = _get_file_listing(iso_path)
         if not is_bootable(listing, iso_path=iso_path):
             self.log_message("WARNING: Selected image does not appear to be bootable!", level="WARN")
-            reply = QMessageBox.question(
-                self,
-                self._T.get("msgbox_not_bootable_title", "Not Bootable"),
-                self._T.get(
-                    "msgbox_not_bootable_body_confirm",
-                    "The selected image does not appear to be bootable.\n\nDo you want to continue anyway?",
-                ),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
+            if not self._confirm_unbootable_image():
                 state.iso_path = ""
                 self.log_message("ISO selection cancelled due to non-bootable image", level="WARN")
                 return
@@ -1265,6 +1261,19 @@ class LufusWindow(QMainWindow):
         else:
             self.log_message("Unknown ISO type, defaulting to Other")
             self.combo_image_option.setCurrentIndex(2)  # Other
+
+    def _confirm_unbootable_image(self) -> bool:
+        reply = QMessageBox.question(
+            self,
+            self._T.get("msgbox_not_bootable_title", "Not Bootable"),
+            self._T.get(
+                "msgbox_not_bootable_body_confirm",
+                "The selected image does not appear to be bootable.\n\nDo you want to continue anyway?",
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
 
     def show_log(self):
         # show log window with all entries :D

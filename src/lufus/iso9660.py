@@ -16,6 +16,10 @@ log = get_logger(__name__)
 
 _SECTOR_SIZE = 2048
 _PVD_LBA = 16
+_VD_TYPE_BOOT_RECORD = 0
+_VD_TYPE_TERMINATOR = 255
+_VD_MAGIC = b"CD001"
+_EL_TORITO_SYSTEM_ID = b"EL TORITO SPECIFICATION"
 
 
 def _pvd_offset(lba: int) -> int:
@@ -75,6 +79,71 @@ class _DirRecord:
 def _read_sector(f, lba: int) -> bytes:
     f.seek(_pvd_offset(lba))
     return f.read(_SECTOR_SIZE)
+
+
+def has_el_torito_boot_catalog(iso_path: str) -> bool:
+    """Return True when an ISO contains a bootable El Torito catalog."""
+    try:
+        with open(iso_path, "rb") as f:
+            for lba in range(_PVD_LBA, _PVD_LBA + 64):
+                descriptor = _read_sector(f, lba)
+                if len(descriptor) < _SECTOR_SIZE or descriptor[1:6] != _VD_MAGIC:
+                    return False
+
+                descriptor_type = descriptor[0]
+                if descriptor_type == _VD_TYPE_BOOT_RECORD:
+                    system_id = descriptor[7:39].rstrip(b"\0 ")
+                    if system_id != _EL_TORITO_SYSTEM_ID:
+                        continue
+
+                    catalog_lba = struct.unpack_from("<I", descriptor, 71)[0]
+                    if catalog_lba <= 0:
+                        return False
+
+                    catalog = _read_sector(f, catalog_lba)
+                    if len(catalog) < 64:
+                        return False
+
+                    validation = catalog[:32]
+                    checksum = sum(struct.unpack_from("<16H", validation)) & 0xFFFF
+                    valid_signature = validation[0] == 0x01 and validation[30:32] == b"\x55\xAA"
+                    if valid_signature and checksum == 0:
+                        return _boot_catalog_has_bootable_entry(catalog)
+
+                    log.debug("has_el_torito_boot_catalog: invalid catalog validation entry in %s", iso_path)
+                    return False
+
+                if descriptor_type == _VD_TYPE_TERMINATOR:
+                    return False
+
+            return False
+    except (OSError, struct.error) as e:
+        log.debug("has_el_torito_boot_catalog(%s): %s", iso_path, e)
+        return False
+
+
+def _boot_catalog_has_bootable_entry(catalog: bytes) -> bool:
+    """Scan an El Torito catalog for at least one bootable section entry."""
+    pos = 32
+    while pos + 32 <= len(catalog):
+        entry = catalog[pos : pos + 32]
+        indicator = entry[0]
+
+        if indicator == 0x88:
+            return True
+        if indicator == 0x90:
+            # Section header; the following entry can carry the boot indicator.
+            pos += 32
+            continue
+        if indicator in (0x00, 0x91):
+            pos += 32
+            continue
+        if entry == b"\0" * 32:
+            return False
+
+        pos += 32
+
+    return False
 
 
 def _walk_dir(f, lba: int, length: int) -> list[tuple[str, bool, int, int]]:

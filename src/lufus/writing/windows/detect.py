@@ -5,9 +5,9 @@ Detection runs in this order for each call to detect_iso_type():
   1. PVD label  — pure Python, zero subprocesses, instant.
                   Most distros and all Microsoft ISOs brand the label clearly.
 
-  2. File tree  — via 7z (p7zip-full) if available, else isoinfo (genisoimage).
-                  Uses markers that are *exclusive* to each OS family so the
-                  two sets never overlap and produce false positives.
+  2. File tree  — via the pure Python ISO reader first, then optional 7z or
+                  bsdtar for UDF-heavy images. Uses markers that are
+                  *exclusive* to each OS family so the two sets never overlap.
 
 is_windows_iso() and is_linux_iso() are thin wrappers kept for backward
 compatibility.  Prefer calling detect_iso_type() directly when possible so
@@ -15,12 +15,16 @@ the file listing is only fetched once.
 """
 
 import re
+import shutil
+import subprocess
 from enum import Enum
 
 from lufus.lufus_logging import get_logger
-from lufus.iso9660 import has_any_file, list_files, read_file
+from lufus.iso9660 import has_el_torito_boot_catalog, list_files, read_file
 
 log = get_logger(__name__)
+
+_ARCHIVE_TOOL_TIMEOUT = 10
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +109,129 @@ def _get_file_listing(iso_path: str) -> "list[str] | None":
     files = list_files(iso_path)
     if files is None:
         log.info("detect: pure Python ISO reader could not read %s", iso_path)
+        files = _get_file_listing_via_archive_tools(iso_path)
     return files
+
+
+def _normalise_archive_path(path: str) -> str:
+    return path.strip().replace("\\", "/").lower().strip("/")
+
+
+def _get_file_listing_via_archive_tools(iso_path: str) -> "list[str] | None":
+    """List ISO/UDF contents with optional archive tools when available."""
+    for tool in ("7z", "7zz", "7za"):
+        exe = shutil.which(tool)
+        if not exe:
+            continue
+        try:
+            result = subprocess.run(
+                [exe, "l", "-slt", iso_path],
+                capture_output=True,
+                text=True,
+                timeout=_ARCHIVE_TOOL_TIMEOUT,
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            log.debug("detect: %s listing failed for %s: %s", tool, iso_path, e)
+            continue
+        if result.returncode != 0:
+            log.debug("detect: %s listing returned %s for %s", tool, result.returncode, iso_path)
+            continue
+
+        files = [
+            _normalise_archive_path(line.removeprefix("Path = "))
+            for line in result.stdout.splitlines()
+            if line.startswith("Path = ")
+        ]
+        files = [path for path in files if path]
+        if files:
+            return files
+
+    exe = shutil.which("bsdtar")
+    if exe:
+        try:
+            result = subprocess.run(
+                [exe, "-tf", iso_path],
+                capture_output=True,
+                text=True,
+                timeout=_ARCHIVE_TOOL_TIMEOUT,
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            log.debug("detect: bsdtar listing failed for %s: %s", iso_path, e)
+        else:
+            if result.returncode == 0:
+                files = [_normalise_archive_path(line) for line in result.stdout.splitlines()]
+                files = [path for path in files if path]
+                if files:
+                    return files
+            else:
+                log.debug("detect: bsdtar listing returned %s for %s", result.returncode, iso_path)
+
+    return None
+
+
+def _read_file_via_archive_tools(iso_path: str, wanted_path: str, max_bytes: int = 65536) -> bytes | None:
+    """Read a small ISO/UDF file with optional archive tools when available."""
+    wanted = wanted_path.strip("/")
+    if not wanted:
+        return None
+
+    for tool in ("7z", "7zz", "7za"):
+        exe = shutil.which(tool)
+        if not exe:
+            continue
+        for candidate in _archive_read_candidates(wanted):
+            try:
+                result = subprocess.run(
+                    [exe, "x", "-bd", "-so", iso_path, candidate],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=_ARCHIVE_TOOL_TIMEOUT,
+                )
+            except (OSError, subprocess.TimeoutExpired) as e:
+                log.debug("detect: %s read failed for %s:%s: %s", tool, iso_path, candidate, e)
+                continue
+            if result.returncode == 0 and result.stdout:
+                return result.stdout[:max_bytes]
+
+    exe = shutil.which("bsdtar")
+    if exe:
+        for candidate in _archive_read_candidates(wanted):
+            try:
+                result = subprocess.run(
+                    [exe, "-xOf", iso_path, candidate],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=_ARCHIVE_TOOL_TIMEOUT,
+                )
+            except (OSError, subprocess.TimeoutExpired) as e:
+                log.debug("detect: bsdtar read failed for %s:%s: %s", iso_path, candidate, e)
+            else:
+                if result.returncode == 0 and result.stdout:
+                    return result.stdout[:max_bytes]
+
+    return None
+
+
+def _archive_read_candidates(wanted_path: str) -> list[str]:
+    candidates = [wanted_path]
+    upper = wanted_path.upper()
+    if upper != wanted_path:
+        candidates.append(upper)
+
+    parent, sep, filename = wanted_path.rpartition("/")
+    if sep:
+        upper_filename = f"{parent}/{filename.upper()}"
+        if upper_filename not in candidates:
+            candidates.append(upper_filename)
+
+    return candidates
+
+
+def _read_windows_metadata_file(iso_path: str, metadata_path: str) -> bytes | None:
+    data = read_file(iso_path, metadata_path)
+    if data:
+        return data
+    return _read_file_via_archive_tools(iso_path, metadata_path)
 
 
 # ---------------------------------------------------------------------------
@@ -205,13 +331,11 @@ _WINDOWS_METADATA_FILES = (
 
 def _get_info_via_file_cmd(iso_path: str) -> str:
     """Run 'file' command on the ISO to get descriptive info."""
-    import subprocess
-
     try:
         # -b = brief (no filename), -L = follow symlinks
         result = subprocess.run(["file", "-bL", iso_path], capture_output=True, text=True, timeout=2)
         return result.stdout.strip()
-    except Exception:
+    except (OSError, subprocess.TimeoutExpired):
         return ""
 
 
@@ -245,7 +369,7 @@ def _file_info_says_bootable(info: str) -> bool:
     text = info.lower()
     if not text:
         return False
-    if "not bootable" in text or "non-bootable" in text:
+    if _file_info_says_not_bootable(info):
         return False
     return any(
         phrase in text
@@ -260,10 +384,30 @@ def _file_info_says_bootable(info: str) -> bool:
     )
 
 
+def _file_info_says_not_bootable(info: str) -> bool:
+    text = info.lower()
+    return "not bootable" in text or "non-bootable" in text or "non bootable" in text
+
+
 def is_bootable(listing: list[str], iso_path: str = None) -> bool:
     """Check if the file listing suggests the image is bootable (BIOS or UEFI)."""
 
-    # 1. Check listing if available
+    if iso_path:
+        info = _get_info_via_file_cmd(iso_path)
+        if _file_info_says_not_bootable(info):
+            log.info("is_bootable: 'file' command explicitly reported a non-bootable image")
+            return False
+        if _file_info_says_bootable(info):
+            log.info("is_bootable: 'file' command detected bootable flag")
+            return True
+        if has_el_torito_boot_catalog(iso_path):
+            log.info("is_bootable: El Torito boot catalog detected")
+            return True
+        if iso_path.lower().endswith(".iso"):
+            return False
+
+    # Fallback for callers that only have a file listing. These markers prove
+    # bootloader files exist, but not that an ISO has boot catalog metadata.
     if listing:
         strict_markers = {
             "bootmgr",
@@ -297,13 +441,6 @@ def is_bootable(listing: list[str], iso_path: str = None) -> bool:
         if any(config in lower_listing for config in grub_configs) and any(
             _has_marker(lower_listing, payload) for payload in grub_payloads
         ):
-            return True
-
-    # 2. Fallback to 'file' command (detects El Torito boot info even if UDF tree is unreadable)
-    if iso_path:
-        info = _get_info_via_file_cmd(iso_path)
-        if _file_info_says_bootable(info):
-            log.info("is_bootable: 'file' command detected bootable flag")
             return True
 
     return False
@@ -420,7 +557,7 @@ def get_windows_version(iso_path: str) -> int | None:
             return version
 
     for metadata_path in _WINDOWS_METADATA_FILES:
-        data = read_file(iso_path, metadata_path)
+        data = _read_windows_metadata_file(iso_path, metadata_path)
         if not data:
             continue
         text = data.decode("utf-8", errors="replace")
