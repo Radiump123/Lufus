@@ -259,6 +259,23 @@ class TestWindowsTweaksMountedTarget:
         assert tweaks_module.apply_windows_tweaks(str(tmp_path)) is True
         assert calls == [("hw", str(tmp_path)), ("name", str(tmp_path)), ("privacy", str(tmp_path))]
 
+    def test_local_account_tweak_applies_without_microsoft_checkbox(self, tmp_path, monkeypatch):
+        calls = []
+
+        monkeypatch.setattr(tweaks_module.state, "win_hardware_bypass", 0)
+        monkeypatch.setattr(tweaks_module.state, "win_microsoft_acc", 0)
+        monkeypatch.setattr(tweaks_module.state, "win_local_acc_chk", 1)
+        monkeypatch.setattr(tweaks_module.state, "win_privacy", 0)
+        monkeypatch.setattr(
+            tweaks_module, "win_local_acc_name", lambda mount=None: calls.append(("name", mount)) or True
+        )
+        monkeypatch.setattr(
+            tweaks_module, "win_local_acc", lambda mount=None: calls.append(("msa", mount)) or True
+        )
+
+        assert tweaks_module.apply_windows_tweaks(str(tmp_path)) is True
+        assert calls == [("name", str(tmp_path))]
+
     def test_flash_windows_applies_tweaks_before_unmounting_targets(self):
         import inspect
 
@@ -329,6 +346,7 @@ class TestFlashWindowsCopyGuards:
 
     def test_mount_or_raise_fails_on_false_mount(self, monkeypatch):
         monkeypatch.setattr(fw_module, "block_mount", lambda *args, **kwargs: False)
+        monkeypatch.setattr(fw_module, "_unmount_existing_mount", lambda *args, **kwargs: None)
 
         try:
             fw_module._mount_or_raise("/dev/sdb1", "/tmp/target", fstype="vfat")
@@ -336,6 +354,37 @@ class TestFlashWindowsCopyGuards:
             assert "Failed to mount /dev/sdb1" in str(e)
         else:
             raise AssertionError("_mount_or_raise must raise when block_mount returns False")
+
+    def test_ntfs_mount_uses_ntfs3(self, monkeypatch):
+        calls = []
+
+        def fake_mount(*args, **kwargs):
+            calls.append(kwargs.get("fstype"))
+            return kwargs.get("fstype") == "ntfs3"
+
+        monkeypatch.setattr(fw_module, "block_mount", fake_mount)
+        monkeypatch.setattr(fw_module, "_unmount_existing_mount", lambda *args, **kwargs: None)
+
+        fw_module._mount_or_raise("/dev/sdb1", "/tmp/target", fstype="ntfs")
+
+        assert calls == ["ntfs3"]
+
+    def test_ntfs_mount_falls_back_to_ntfs3g(self, monkeypatch):
+        calls = []
+
+        monkeypatch.setattr(fw_module, "block_mount", lambda *args, **kwargs: False)
+        monkeypatch.setattr(fw_module, "_unmount_existing_mount", lambda *args, **kwargs: None)
+        monkeypatch.setattr(fw_module.shutil, "which", lambda cmd: "/usr/bin/ntfs-3g" if cmd == "ntfs-3g" else None)
+
+        def fake_run_cmd(cmd, check=True):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(fw_module, "run_cmd", fake_run_cmd)
+
+        fw_module._mount_or_raise("/dev/sdb1", "/tmp/target", fstype="ntfs")
+
+        assert calls == [["/usr/bin/ntfs-3g", "-o", "windows_names,big_writes", "/dev/sdb1", "/tmp/target"]]
 
     def test_verify_windows_media_copy_rejects_empty_target(self, tmp_path):
         try:

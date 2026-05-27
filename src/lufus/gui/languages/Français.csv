@@ -151,6 +151,9 @@ msgbox_root_required_info,"Pour exécuter Lufus en tant que root, vous avez beso
 Veuillez installer ces paquets via le gestionnaire de paquets de votre distribution."
 msgbox_not_bootable_title,Non Bootable
 msgbox_not_bootable_body,L'image sélectionnée ne semble pas être bootable. Elle pourrait ne pas fonctionner comme support d'installation.
+msgbox_not_bootable_body_confirm,"L'image sélectionnée ne semble pas être bootable.
+
+Voulez-vous continuer quand même ?"
 wintweaks_title,Ajustements Windows (PEUT CASSER ! UTILISER AVEC PRUDENCE)
 wintweaks_ask,Voulez-vous personnaliser votre installation Windows ?
 wintweaks_hardware,"Supprimer les exigences pour 4 Go+ de RAM, Secure Boot et TPM 2.0"

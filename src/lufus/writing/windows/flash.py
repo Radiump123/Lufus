@@ -6,6 +6,7 @@ import tempfile
 import re
 import time
 import shlex
+import errno
 from typing import TypedDict
 from lufus import state
 from lufus.lufus_logging import get_logger
@@ -15,6 +16,7 @@ from lufus.block_ops import (
     mount as block_mount,
     mount_iso as block_mount_iso,
     umount as block_umount,
+    umount_lazy as block_umount_lazy,
     umount_iso as block_umount_iso,
     write_device_image,
     get_sysfs_device_size_sectors,
@@ -322,11 +324,40 @@ def _copy_efi_boot_files(iso_mount, mount_efi, _status):
 
 
 def _mount_or_raise(source: str, target: str, fstype: str | None = None) -> None:
+    _unmount_existing_mount(source)
+    if fstype == "ntfs":
+        if block_mount(source, target, fstype="ntfs3", options="windows_names"):
+            return
+
+        ntfs_3g = shutil.which("ntfs-3g")
+        if ntfs_3g:
+            result = run_cmd([ntfs_3g, "-o", "windows_names,big_writes", source, target], check=False)
+            if result and result.returncode == 0:
+                return
+
+        raise OSError(f"Failed to mount {source} on {target} as NTFS (tried ntfs3 and ntfs-3g)")
+
     if not block_mount(source, target, fstype=fstype):
         raise OSError(f"Failed to mount {source} on {target}")
 
 
+def _unmount_existing_mount(source: str, status_cb=None) -> None:
+    """Detach an automounted partition before Lufus mounts it itself."""
+    err = block_umount(source)
+    if err == 0:
+        if status_cb:
+            status_cb(f"Unmounted existing mount on {source}")
+        return
+
+    if err == errno.EBUSY:
+        if status_cb:
+            status_cb(f"Existing mount on {source} is busy, lazy-unmounting it")
+        block_umount_lazy(source)
+
+
 def _data_partition_fstype(scheme: PartitionScheme) -> str | None:
+    if scheme == PartitionScheme.WINDOWS_NTFS:
+        return "ntfs"
     if scheme == PartitionScheme.SIMPLE_FAT32:
         return "vfat"
     if scheme == PartitionScheme.WINDOWS_EXFAT:
@@ -401,6 +432,10 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
         time.sleep(1)
         _emit(15)
 
+        _unmount_existing_mount(data_part, _status)
+        if efi_part:
+            _unmount_existing_mount(efi_part, _status)
+
         # Step 3: Format partitions
         if scheme == PartitionScheme.WINDOWS_NTFS:
             ntfs_cmd = _find_ntfs_tool(status_cb=_status)
@@ -430,10 +465,12 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
             try:
                 if efi_part and scheme == PartitionScheme.SIMPLE_FAT32:
                     mount_efi = tempfile.mkdtemp()
+                    _unmount_existing_mount(efi_part, _status)
                     _mount_or_raise(efi_part, mount_efi, fstype="vfat")
                     efi_mounted = True
 
                 _status(f"Mounting {data_part} -> {mount_data}")
+                _unmount_existing_mount(data_part, _status)
                 _mount_or_raise(data_part, mount_data, fstype=_data_partition_fstype(scheme))
                 data_mounted = True
 
@@ -472,7 +509,8 @@ def flash_windows(device: str, iso: str, scheme: PartitionScheme, progress_cb=No
 
                 # Step 7: Apply Windows tweaks while the target partition is still mounted.
                 if any(
-                    getattr(state, attr, 0) == 1 for attr in ("win_hardware_bypass", "win_microsoft_acc", "win_privacy")
+                    getattr(state, attr, 0) == 1
+                    for attr in ("win_hardware_bypass", "win_microsoft_acc", "win_local_acc_chk", "win_privacy")
                 ):
                     _status("Applying selected Windows tweaks...")
                     if apply_windows_tweaks(mount_data):

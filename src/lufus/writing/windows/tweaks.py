@@ -477,12 +477,15 @@ def apply_windows_tweaks(mount: str) -> bool:
     """Apply selected Windows tweaks to an already-mounted install media root."""
     ok = True
     if getattr(state, "win_hardware_bypass", 0) == 1:
+        log.info("apply_windows_tweaks: applying hardware bypass")
         ok = win_hardware_bypass(mount) and ok
-    if getattr(state, "win_microsoft_acc", 0) == 1:
-        if getattr(state, "win_local_acc_chk", 0) == 1:
-            ok = win_local_acc_name(mount) and ok
-        else:
-            ok = win_local_acc(mount) and ok
+    if getattr(state, "win_local_acc_chk", 0) == 1:
+        log.info("apply_windows_tweaks: applying local account creation")
+        ok = win_local_acc_name(mount) and ok
+    elif getattr(state, "win_microsoft_acc", 0) == 1:
+        log.info("apply_windows_tweaks: applying Microsoft account bypass")
+        ok = win_local_acc(mount) and ok
     if getattr(state, "win_privacy", 0) == 1:
+        log.info("apply_windows_tweaks: applying privacy question bypass")
         ok = win_skip_privacy_questions(mount) and ok
     return ok
