@@ -39,7 +39,7 @@ class AppState:
     win_hardware_bypass: int = 0
     win_microsoft_acc: int = 0
     win_local_acc_chk: int = 0
-    win_local_acc: str = "default"
+    win_local_acc: str = ""
     win_local_acc_pwd: str = ""
     win_privacy: int = 0
 

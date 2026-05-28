@@ -329,7 +329,6 @@ class WinTweaks(QDialog):
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.setMaxLength(127)
 
-        self.microsoft_checkbox.toggled.connect(self.localacc_checkbox.setEnabled)
         self.localacc_checkbox.toggled.connect(self.username_input.setEnabled)
         self.localacc_checkbox.toggled.connect(self.password_input.setEnabled)
 

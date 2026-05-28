@@ -97,8 +97,15 @@ def _get_autounattend(mount: str, arch: str) -> tuple[ET.ElementTree, ET.Element
 
 
 def _save_autounattend(tree: ET.ElementTree, mount: str) -> None:
-    """Write autounattend.xml to the mount."""
+    """Write autounattend.xml to the mount. Ensures file is writable if it exists."""
     path = os.path.join(mount, "autounattend.xml")
+    if os.path.exists(path):
+        try:
+            # Ensure it is writable (add owner-write bit)
+            mode = os.stat(path).st_mode
+            os.chmod(path, mode | 0o200)
+        except Exception as e:
+            log.warning("_save_autounattend: failed to chmod %s: %s", path, e)
     tree.write(path, xml_declaration=True, encoding="utf-8")
 
 
@@ -199,6 +206,25 @@ _HARDWARE_BYPASS_COMMANDS = [
     r'cmd /c reg add "HKLM\SYSTEM\Setup\LabConfig" /v BypassStorageCheck /t REG_DWORD /d 1 /f',
 ]
 
+# Registry commands for chntpw -e (one per line)
+_HARDWARE_BYPASS_REG_COMMANDS = [
+    "cd Setup",
+    "nk LabConfig",
+    "cd LabConfig",
+    "ed BypassTPMCheck",
+    "1",
+    "ed BypassSecureBootCheck",
+    "1",
+    "ed BypassRAMCheck",
+    "1",
+    "ed BypassCPUCheck",
+    "1",
+    "ed BypassStorageCheck",
+    "1",
+    "q",
+    "y",
+]
+
 
 def _add_windows_pe_hardware_bypass(tree: ET.ElementTree, arch: str) -> None:
     _add_run_synchronous_commands(
@@ -213,6 +239,9 @@ def _add_windows_pe_hardware_bypass(tree: ET.ElementTree, arch: str) -> None:
 
 def _validate_windows_username(name: str) -> str | None:
     """Return a stripped, validated Windows username or None if invalid."""
+    if not isinstance(name, str):
+        log.error("Windows username is not a string: %r", name)
+        return None
     name = name.strip()
     if not name:
         log.error("Windows username is empty after stripping.")
@@ -341,15 +370,27 @@ def win_hardware_bypass(mount: str | None = None) -> bool:
         log.error("win_hardware_bypass: no USB mount found")
         return False
     arch = _detect_arch(mount)
+
+    # Robust bypass: try both autounattend.xml and boot.wim registry modification
+    # (if tools are available).
+    ok = True
     try:
         tree, _ = _get_autounattend(mount, arch)
         _add_windows_pe_hardware_bypass(tree, arch)
         _save_autounattend(tree, mount)
         log.info("win_hardware_bypass: autounattend.xml hardware bypass commands written at %s", mount)
-        return True
     except Exception as e:
         log.error("win_hardware_bypass: failed to write autounattend.xml: %s", e)
-        return False
+        ok = False
+
+    if _check_tweak_deps():
+        log.info("win_hardware_bypass: applying registry bypass to boot.wim")
+        if not _modify_boot_wim_registry(mount, "SYSTEM", _HARDWARE_BYPASS_REG_COMMANDS, "win_hardware_bypass"):
+            log.warning("win_hardware_bypass: failed to apply registry bypass to boot.wim (continuing with XML only)")
+            # We don't return False here because XML bypass might still work.
+
+    return ok
+
 
 
 def win_local_acc(mount: str | None = None) -> bool:

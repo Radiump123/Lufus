@@ -8,6 +8,7 @@ from lufus.lufus_logging import get_logger, setup_logging
 from lufus import state
 from lufus.drives import formatting as fo
 from lufus.writing.flash_usb import flash_usb
+from lufus.writing.partition_scheme import PartitionScheme
 
 setup_logging()
 log = get_logger(__name__)
@@ -99,6 +100,16 @@ def main():
         iso_path = options.get("iso_path", "")
         image_option = options["image_option"]
 
+        # Determine partition scheme from options (default to NTFS for Windows)
+        fs_text = options.get("fs_text", "NTFS")
+        scheme_map = {
+            "NTFS": PartitionScheme.WINDOWS_NTFS,
+            "FAT32": PartitionScheme.SIMPLE_FAT32,
+            "exFAT": PartitionScheme.WINDOWS_EXFAT,
+            "ext4": PartitionScheme.LINUX,
+        }
+        scheme = scheme_map.get(fs_text, PartitionScheme.WINDOWS_NTFS)
+
         # Unmount all partitions
         _msg = f"Ensuring {device_node} is unmounted..."
         print(f"STATUS:{_msg}")
@@ -123,7 +134,7 @@ def main():
                 status_cb("Ventoy installation failed")
                 log.error("Ventoy installation failed for device %s", device_node)
         else:  # Windows / Linux / Other / Format Only
-            success = flash_usb(device_node, iso_path, progress_cb=progress_cb, status_cb=status_cb)
+            success = flash_usb(device_node, iso_path, scheme, progress_cb=progress_cb, status_cb=status_cb)
 
         log.info("flash_worker exiting, success=%s", success)
         sys.exit(0 if success else 1)

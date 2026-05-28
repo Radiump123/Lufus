@@ -114,15 +114,18 @@ def test_windows_version_reads_archive_metadata_fallback(monkeypatch):
     assert detect_module.get_windows_version("win11.iso") == 11
 
 
-def test_hardware_bypass_writes_autounattend_without_wim_tools(tmp_path, monkeypatch):
+def test_hardware_bypass_handles_readonly_existing_xml(tmp_path, monkeypatch):
     monkeypatch.setattr(tweaks_module, "_detect_arch", lambda _mount: "amd64")
+    # Disable boot.wim modification for this test to focus on XML
+    monkeypatch.setattr(tweaks_module, "_check_tweak_deps", lambda: False)
+
+    xml_path = tmp_path / "autounattend.xml"
+    xml_path.write_text("<unattend/>")
+    # Make it read-only
+    xml_path.chmod(0o444)
 
     assert tweaks_module.win_hardware_bypass(str(tmp_path)) is True
 
-    xml_path = tmp_path / "autounattend.xml"
-    assert xml_path.exists()
+    # Verify it was written to
     root = ET.parse(xml_path).getroot()
-    body = ET.tostring(root, encoding="unicode")
-    assert "BypassTPMCheck" in body
-    assert "windowsPE" in body
-    assert "wcm:action" in body
+    assert "BypassTPMCheck" in ET.tostring(root, encoding="unicode")

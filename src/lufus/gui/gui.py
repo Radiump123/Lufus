@@ -1560,7 +1560,9 @@ class LufusWindow(QMainWindow):
 
                 win_ver = get_windows_version(state.iso_path)
                 self.log_message(f"Detected Windows version: {win_ver}")
-                if win_ver == 11:
+                if win_ver == 11 or win_ver is None:
+                    if win_ver is None:
+                        self.log_message("Windows version ambiguous — showing WinTweaks dialog as precaution")
                     dlg = WinTweaks(self)
                     result = dlg.exec()
                     self.log_message(f"WinTweaks dialog closed with result: {result}")
@@ -1569,6 +1571,11 @@ class LufusWindow(QMainWindow):
                         return
                 else:
                     self.log_message(f"Windows version is {win_ver}, skipping WinTweaks dialog (only for Win11)")
+                    # Reset tweaks for non-Win11 to avoid state pollution
+                    state.win_hardware_bypass = 0
+                    state.win_microsoft_acc = 0
+                    state.win_local_acc_chk = 0
+                    state.win_privacy = 0
             self.log_message("Proceeding to perform_flash")
 
             self.perform_flash()
@@ -1584,7 +1591,9 @@ class LufusWindow(QMainWindow):
 
                 win_ver = get_windows_version(state.iso_path)
                 self.log_message(f"Detected Windows version: {win_ver}")
-                if win_ver == 11:
+                if win_ver == 11 or win_ver is None:
+                    if win_ver is None:
+                        self.log_message("Windows version ambiguous — showing WinTweaks dialog as precaution")
                     dlg = WinTweaks(self)
                     if dlg.exec() == QDialog.DialogCode.Rejected:
                         self.btn_start.setEnabled(True)
@@ -1594,6 +1603,11 @@ class LufusWindow(QMainWindow):
                         return
                 else:
                     self.log_message(f"Windows version is {win_ver}, skipping WinTweaks dialog (only for Win11)")
+                    # Reset tweaks for non-Win11 to avoid state pollution
+                    state.win_hardware_bypass = 0
+                    state.win_microsoft_acc = 0
+                    state.win_local_acc_chk = 0
+                    state.win_privacy = 0
             self.perform_flash()
 
         else:
@@ -1658,6 +1672,13 @@ class LufusWindow(QMainWindow):
             "new_label": state.new_label,
             "verify_hash": state.verify_hash,
             "expected_hash": state.expected_hash,
+            # WinTweaks states — must be passed so subprocess paths have them
+            "win_hardware_bypass": state.win_hardware_bypass,
+            "win_microsoft_acc": state.win_microsoft_acc,
+            "win_local_acc_chk": state.win_local_acc_chk,
+            "win_local_acc": state.win_local_acc,
+            "win_local_acc_pwd": state.win_local_acc_pwd,
+            "win_privacy": state.win_privacy,
         }
 
         # Root elevation is now handled at startup in start_gui.py.
@@ -1971,7 +1992,9 @@ class LufusWindow(QMainWindow):
         from lufus.writing.windows.detect import get_windows_version
 
         win_ver = get_windows_version(state.iso_path)
-        if win_ver == 11:
+        if win_ver == 11 or win_ver is None:
+            if win_ver is None:
+                self.log_message("Windows version ambiguous — showing WinTweaks dialog as precaution")
             dialog = WinTweaks(self)
             dialog.exec()
         else:
