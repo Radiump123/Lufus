@@ -392,7 +392,6 @@ def win_hardware_bypass(mount: str | None = None) -> bool:
     return ok
 
 
-
 def win_local_acc(mount: str | None = None) -> bool:
     mount = _resolve_windows_mount(mount)
     if not mount:

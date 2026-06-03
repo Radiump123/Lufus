@@ -269,9 +269,7 @@ class TestWindowsTweaksMountedTarget:
         monkeypatch.setattr(
             tweaks_module, "win_local_acc_name", lambda mount=None: calls.append(("name", mount)) or True
         )
-        monkeypatch.setattr(
-            tweaks_module, "win_local_acc", lambda mount=None: calls.append(("msa", mount)) or True
-        )
+        monkeypatch.setattr(tweaks_module, "win_local_acc", lambda mount=None: calls.append(("msa", mount)) or True)
 
         assert tweaks_module.apply_windows_tweaks(str(tmp_path)) is True
         assert calls == [("name", str(tmp_path))]

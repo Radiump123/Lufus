@@ -106,7 +106,7 @@ def has_el_torito_boot_catalog(iso_path: str) -> bool:
 
                     validation = catalog[:32]
                     checksum = sum(struct.unpack_from("<16H", validation)) & 0xFFFF
-                    valid_signature = validation[0] == 0x01 and validation[30:32] == b"\x55\xAA"
+                    valid_signature = validation[0] == 0x01 and validation[30:32] == b"\x55\xaa"
                     if valid_signature and checksum == 0:
                         return _boot_catalog_has_bootable_entry(catalog)
 

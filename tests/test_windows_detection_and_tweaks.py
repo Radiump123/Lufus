@@ -67,7 +67,7 @@ def test_has_el_torito_boot_catalog_reads_iso_metadata(tmp_path):
 
     validation = bytearray(32)
     validation[0] = 1
-    validation[30:32] = b"\x55\xAA"
+    validation[30:32] = b"\x55\xaa"
     checksum = (-sum(struct.unpack_from("<16H", validation))) & 0xFFFF
     struct.pack_into("<H", validation, 28, checksum)
 
